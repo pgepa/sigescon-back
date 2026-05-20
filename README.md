@@ -233,6 +233,10 @@ JWT_SECRET_KEY=sua_chave_secreta_muito_segura_aqui
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=720
 
+# CORS (opcional): origens do front, separadas por vírgula. Se omitido, permite qualquer origem
+# e habilita Private Network Access no Chrome quando o Starlette suportar (útil se a API está em IP privado).
+# CORS_ALLOW_ORIGINS=https://app.exemplo.gov.br,http://10.0.0.10:8080
+
 # Admin padrão (criado pelo seeder)
 ADMIN_EMAIL=admin@sigescon.com
 ADMIN_PASSWORD=Admin@123

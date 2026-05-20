@@ -1,5 +1,6 @@
 # app/main.py 
 import time
+import inspect
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends 
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +23,7 @@ from app.api.routers import usuario_perfil_router
 from app.api.routers import termo_aditivo_router
 # Imports dos sistemas avançados
 from app.core.database import get_db_pool, close_db_pool
+from app.core.config import settings
 from app.middleware.audit import AuditMiddleware
 from app.middleware.logging import setup_logging
 from app.services.notification_service import NotificationScheduler
@@ -35,6 +37,27 @@ from app.api.exception_handlers import (
 from app.core.exceptions import SigesconException
 
 from app.api.doc_dependencies import get_admin_for_docs
+
+
+def _parse_cors_origins() -> list[str]:
+    raw = (settings.CORS_ALLOW_ORIGINS or "").strip()
+    if not raw:
+        return ["*"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def _cors_middleware_kwargs() -> dict:
+    """CORS para SPA com JWT no header Authorization (sem cookies cross-origin)."""
+    kw: dict = {
+        "allow_origins": _parse_cors_origins(),
+        # Bearer token não depende de cookie; False evita combinações problemáticas com allow_origins=["*"] em alguns navegadores.
+        "allow_credentials": False,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+    if "allow_private_network" in inspect.signature(CORSMiddleware.__init__).parameters:
+        kw["allow_private_network"] = True
+    return kw
 
 
 # Configuração de logging
@@ -127,18 +150,14 @@ app.router.redirect_slashes = False
 print("Redirects automáticos desabilitados - URLs com e sem barra final funcionam igualmente")
 
 # === MIDDLEWARE ===
+# CORSMiddleware deve ser registrado por último para ficar o mais externo e tratar OPTIONS/preflight primeiro.
+# (add_middleware empilha em LIFO no Starlette.)
 
-# 1. Middleware de CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 2. Middleware de auditoria
+# 1. Middleware de auditoria
 app.add_middleware(AuditMiddleware)
+
+# 2. CORS (Private Network Access quando o Starlette suportar)
+app.add_middleware(CORSMiddleware, **_cors_middleware_kwargs())
 
 # 3. Middleware para adicionar timestamp na request
 @app.middleware("http")
@@ -170,12 +189,15 @@ app.add_exception_handler(Exception, generic_exception_handler)
 
 # === ROUTERS ===
 
-# Routers de autenticação (sem prefixo)
+# Autenticação: /auth/* na raiz (legado e tokenUrl OAuth2).
 app.include_router(auth_router.router)
 app.include_router(usuario_perfil_router.router)
 
 # Routers principais com prefixo /api/v1
 API_PREFIX = "/api/v1"
+
+# Mesmas rotas de auth em /api/v1/auth/* (alinha com o restante da API e evita 404 no front).
+app.include_router(auth_router.router, prefix=API_PREFIX)
 
 print("🔧 Registrando routers principais...")
 
