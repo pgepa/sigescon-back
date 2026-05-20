@@ -27,15 +27,6 @@ class TermoAditivoService:
 
     async def criar(self, contrato_id: int, dados: TermoAditivoCreate) -> TermoAditivo:
         await self._verificar_contrato(contrato_id)
-        ativos = await self.repo.count_ativos(contrato_id)
-        if ativos >= 1:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=(
-                    "Este contrato já possui um termo aditivo ativo. "
-                    "Exclua o termo existente antes de criar um novo."
-                ),
-            )
         novo = await self.repo.create(contrato_id, dados)
         return TermoAditivo.model_validate(novo)
 

@@ -5,7 +5,7 @@ from typing import List
 
 from app.core.database import get_connection
 from app.api.dependencies import get_current_user
-from app.api.permissions import admin_required
+from app.api.permissions import admin_required, require_admin_or_manager
 from app.schemas.usuario_schema import Usuario
 from app.schemas.termo_aditivo_schema import TermoAditivo, TermoAditivoCreate, TermoAditivoUpdate, TermoAditivoList
 from app.repositories.termo_aditivo_repo import TermoAditivoRepository
@@ -41,9 +41,9 @@ async def criar_aditivo(
     contrato_id: int,
     dados: TermoAditivoCreate,
     service: TermoAditivoService = Depends(get_service),
-    admin_user: Usuario = Depends(admin_required),
+    current_user: Usuario = Depends(require_admin_or_manager),
 ):
-    """Cria um novo termo aditivo. O número sequencial é atribuído automaticamente. Requer Administrador."""
+    """Cria um novo termo aditivo. O número sequencial é atribuído automaticamente. Requer Administrador ou Gestor."""
     return await service.criar(contrato_id, dados)
 
 
@@ -63,9 +63,9 @@ async def atualizar_aditivo(
     aditivo_id: int,
     dados: TermoAditivoUpdate,
     service: TermoAditivoService = Depends(get_service),
-    admin_user: Usuario = Depends(admin_required),
+    current_user: Usuario = Depends(require_admin_or_manager),
 ):
-    """Atualiza campos de um termo aditivo. Requer Administrador."""
+    """Atualiza campos de um termo aditivo. Requer Administrador ou Gestor."""
     return await service.atualizar(contrato_id, aditivo_id, dados)
 
 
@@ -74,9 +74,9 @@ async def excluir_aditivo(
     contrato_id: int,
     aditivo_id: int,
     service: TermoAditivoService = Depends(get_service),
-    admin_user: Usuario = Depends(admin_required),
+    current_user: Usuario = Depends(require_admin_or_manager),
 ):
-    """Exclusão lógica (soft delete). Requer Administrador."""
+    """Exclusão lógica (soft delete). Requer Administrador ou Gestor."""
     return await service.excluir(contrato_id, aditivo_id)
 
 
@@ -86,7 +86,7 @@ async def upload_arquivo_aditivo(
     aditivo_id: int,
     arquivo: UploadFile = File(...),
     service: TermoAditivoService = Depends(get_service),
-    admin_user: Usuario = Depends(admin_required),
+    current_user: Usuario = Depends(require_admin_or_manager),
 ):
-    """Faz upload e vincula um arquivo (PDF, DOC...) ao termo aditivo. Requer Administrador."""
+    """Faz upload e vincula um arquivo (PDF, DOC...) ao termo aditivo. Requer Administrador ou Gestor."""
     return await service.upload_arquivo(contrato_id, aditivo_id, arquivo)
