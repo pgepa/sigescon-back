@@ -8,6 +8,7 @@ requires-python = ">=3.10"
 # Dependências principais da aplicação
 dependencies = [
     "fastapi[all]",
+    "gunicorn>=22.0",
     "asyncpg",
     "python-dotenv",
     "passlib[bcrypt]",
@@ -19,7 +20,8 @@ dependencies = [
     "aiosmtplib",
     "apscheduler",
     "requests",
-    "reportlab"
+    "reportlab",
+    "docxtpl",
 ]
 
 [project.optional-dependencies]
