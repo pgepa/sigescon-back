@@ -65,7 +65,7 @@ class TermoAditivoRepository:
         query = """
             SELECT ta.*
             FROM termo_aditivo ta
-            WHERE ta.contrato_id = $1 AND ta.ativo = TRUE
+            WHERE ta.contrato_id = $1
             ORDER BY ta.numero_aditivo ASC
         """
         rows = await self.conn.fetch(query, contrato_id)

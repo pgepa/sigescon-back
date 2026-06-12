@@ -2,11 +2,12 @@
 import aiofiles
 import os
 import secrets
+from pathlib import Path
 from fastapi import UploadFile, HTTPException, status
 from typing import Tuple, List, Dict, Any
 
-# Define o diretório de uploads na raiz do projeto
-UPLOAD_DIRECTORY = "uploads"
+# Caminho absoluto para a pasta uploads na raiz do projeto
+UPLOAD_DIRECTORY = str(Path(__file__).parent.parent.parent / "uploads")
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'odt', 'ods'}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB por arquivo
 MAX_TOTAL_SIZE = 250 * 1024 * 1024  # 250MB total

@@ -61,33 +61,36 @@ class TermoAditivoService:
         arquivo: UploadFile,
     ) -> TermoAditivo:
         import os, aiofiles
-        from app.core.config import settings
+        from pathlib import Path
 
         aditivo = await self.buscar_por_id(contrato_id, aditivo_id)
 
-        upload_dir = os.path.join(settings.UPLOAD_DIR, "aditivos", str(contrato_id))
-        os.makedirs(upload_dir, exist_ok=True)
+        # Caminho absoluto baseado na raiz do projeto (app/services/ -> ../../)
+        BASE_DIR = Path(__file__).parent.parent.parent
+        upload_dir = BASE_DIR / "uploads" / "aditivos" / str(contrato_id)
+        upload_dir.mkdir(parents=True, exist_ok=True)
 
         filename = f"aditivo_{aditivo_id}_{arquivo.filename}"
-        filepath = os.path.join(upload_dir, filename)
+        filepath = upload_dir / filename
 
         async with aiofiles.open(filepath, "wb") as f:
             content = await arquivo.read()
             await f.write(content)
 
-        # Registra o arquivo na tabela arquivo
+        # Registra o arquivo na tabela arquivo vinculando ao termo_aditivo
         insert_query = """
-            INSERT INTO arquivo (nome_arquivo, caminho_arquivo, tamanho_bytes, tipo_mime, contrato_id, tipo_vinculo)
-            VALUES ($1, $2, $3, $4, $5, 'termo_aditivo')
+            INSERT INTO arquivo (nome_arquivo, caminho_arquivo, tamanho_bytes, tipo_mime, contrato_id, tipo_vinculo, termo_aditivo_id)
+            VALUES ($1, $2, $3, $4, $5, 'termo_aditivo', $6)
             RETURNING id
         """
         arquivo_id = await self.repo.conn.fetchval(
             insert_query,
             arquivo.filename,
-            filepath,
+            str(filepath),  # garante string no banco
             len(content),
             arquivo.content_type,
             contrato_id,
+            aditivo_id,
         )
 
         atualizado = await self.repo.vincular_arquivo(aditivo_id, arquivo_id)

@@ -321,7 +321,7 @@ class ContratoRepository:
 
     # Métodos para gerenciamento de arquivos do contrato
     async def get_arquivos_contrato(self, contrato_id: int) -> List[Dict]:
-        """Busca todos os arquivos de um contrato específico"""
+        """Busca arquivos do contrato (exclui arquivos de termos aditivos e relatórios)"""
         query = """
             SELECT
                 id,
@@ -329,16 +329,19 @@ class ContratoRepository:
                 tipo_mime as tipo_arquivo,
                 tamanho_bytes,
                 contrato_id,
+                tipo_vinculo,
                 created_at::text as created_at
             FROM arquivo
             WHERE contrato_id = $1
+              AND tipo_vinculo = 'contrato'
+              AND ativo = TRUE
             ORDER BY created_at DESC
         """
         rows = await self.conn.fetch(query, contrato_id)
         return [dict(row) for row in rows]
 
     async def get_arquivo_by_id(self, arquivo_id: int, contrato_id: int) -> Optional[Dict]:
-        """Busca um arquivo específico de um contrato"""
+        """Busca um arquivo específico pelo id e contrato (qualquer tipo_vinculo)"""
         query = """
             SELECT
                 id,
@@ -347,9 +350,10 @@ class ContratoRepository:
                 tipo_mime as tipo_arquivo,
                 tamanho_bytes,
                 contrato_id,
+                tipo_vinculo,
                 created_at::text as created_at
             FROM arquivo
-            WHERE id = $1 AND contrato_id = $2
+            WHERE id = $1 AND contrato_id = $2 AND ativo = TRUE
         """
         row = await self.conn.fetchrow(query, arquivo_id, contrato_id)
         return dict(row) if row else None

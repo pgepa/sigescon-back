@@ -205,11 +205,34 @@ async def list_contratos_with_slash(
         tem_garantia, garantia_prazo_dias, service, current_user
     )
 
+def _build_contratos_filters(gestor_id, fiscal_id, objeto, nr_contrato, status_id, pae, ano,
+                              vencimento_dias, tem_garantia, garantia_prazo_dias):
+    filters = {
+        'gestor_id': gestor_id, 'fiscal_id': fiscal_id, 'objeto': objeto,
+        'nr_contrato': nr_contrato, 'status_id': status_id, 'pae': pae, 'ano': ano,
+        'vencimento_dias': vencimento_dias, 'tem_garantia': tem_garantia,
+        'garantia_prazo_dias': garantia_prazo_dias
+    }
+    return {k: v for k, v in filters.items() if v is not None}
+
+
+def _build_order_by(sort_by: Optional[str], sort_order: Optional[str]) -> str:
+    allowed = {
+        'nr_contrato': 'c.nr_contrato',
+        'contratado_nome': 'ct.nome',
+        'data_fim': 'c.data_fim',
+        'objeto': 'c.objeto',
+    }
+    col = allowed.get(sort_by, 'c.data_fim') if sort_by else 'c.data_fim'
+    direction = 'ASC' if sort_order and sort_order.lower() == 'asc' else 'DESC'
+    return f"{col} {direction}"
+
+
 # Rota GET sem barra final
 @router.get("", response_model=ContratoPaginated)
 async def list_contratos(
-    page: int = Query(1, ge=1, description="Número da página"),
-    per_page: int = Query(10, ge=1, le=100, description="Itens por página"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=100),
     gestor_id: Optional[int] = Query(None),
     fiscal_id: Optional[int] = Query(None),
     objeto: Optional[str] = Query(None),
@@ -217,55 +240,29 @@ async def list_contratos(
     status_id: Optional[int] = Query(None),
     pae: Optional[str] = Query(None),
     ano: Optional[int] = Query(None),
-    vencimento_dias: Optional[str] = Query(None, description="Filtro por dias até vencimento (30,60,90)"),
-    tem_garantia: Optional[bool] = Query(None, description="Filtrar contratos que possuem garantia"),
-    garantia_prazo_dias: Optional[str] = Query(None, description="Filtro por prazo da garantia (30,60,90)"),
+    vencimento_dias: Optional[str] = Query(None),
+    tem_garantia: Optional[bool] = Query(None),
+    garantia_prazo_dias: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None, description="Campo para ordenação"),
+    sort_order: Optional[str] = Query(None, description="Direção: asc ou desc"),
     service: ContratoService = Depends(get_contrato_service),
     user_context: tuple = Depends(get_current_user_with_context)
 ):
     current_user, context = user_context
-    filters = {
-        'gestor_id': gestor_id,
-        'fiscal_id': fiscal_id,
-        'objeto': objeto,
-        'nr_contrato': nr_contrato,
-        'status_id': status_id,
-        'pae': pae,
-        'ano': ano,
-        'vencimento_dias': vencimento_dias,
-        'tem_garantia': tem_garantia,
-        'garantia_prazo_dias': garantia_prazo_dias
-    }
-    active_filters = {k: v for k, v in filters.items() if v is not None}
-
-    # Debug dos filtros recebidos
-    if vencimento_dias:
-        print(f"🔍 BACKEND: Filtro vencimento_dias recebido: {vencimento_dias}")
-    else:
-        print(f"🔍 BACKEND: Nenhum filtro de vencimento recebido")
-
-    if tem_garantia:
-        print(f"🛡️ BACKEND: Filtro tem_garantia recebido: {tem_garantia}")
-        if garantia_prazo_dias:
-            print(f"🛡️ BACKEND: Filtro garantia_prazo_dias recebido: {garantia_prazo_dias}")
-    else:
-        print(f"🛡️ BACKEND: Nenhum filtro de garantia recebido")
-
-    print(f"📡 BACKEND: Filtros ativos: {active_filters}")
-
-    # Criar contexto do usuário para isolamento de dados
-    user_ctx = {
-        'usuario_id': context.usuario_id,
-        'perfil_ativo_nome': context.perfil_ativo_nome
-    }
-
-    return await service.get_all_contratos(page=page, per_page=per_page, filters=active_filters, user_context=user_ctx)
+    active_filters = _build_contratos_filters(
+        gestor_id, fiscal_id, objeto, nr_contrato, status_id, pae, ano,
+        vencimento_dias, tem_garantia, garantia_prazo_dias
+    )
+    order_by = _build_order_by(sort_by, sort_order)
+    user_ctx = {'usuario_id': context.usuario_id, 'perfil_ativo_nome': context.perfil_ativo_nome}
+    return await service.get_all_contratos(page=page, per_page=per_page, filters=active_filters,
+                                           user_context=user_ctx, order_by=order_by)
 
 # Rota sem barra final (para evitar redirects do frontend)
 @router.get("", response_model=ContratoPaginated)
 async def list_contratos_without_slash(
-    page: int = Query(1, ge=1, description="Número da página"),
-    per_page: int = Query(10, ge=1, le=100, description="Itens por página"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=100),
     gestor_id: Optional[int] = Query(None),
     fiscal_id: Optional[int] = Query(None),
     objeto: Optional[str] = Query(None),
@@ -273,49 +270,23 @@ async def list_contratos_without_slash(
     status_id: Optional[int] = Query(None),
     pae: Optional[str] = Query(None),
     ano: Optional[int] = Query(None),
-    vencimento_dias: Optional[str] = Query(None, description="Filtro por dias até vencimento (30,60,90)"),
-    tem_garantia: Optional[bool] = Query(None, description="Filtrar contratos que possuem garantia"),
-    garantia_prazo_dias: Optional[str] = Query(None, description="Filtro por prazo da garantia (30,60,90)"),
+    vencimento_dias: Optional[str] = Query(None),
+    tem_garantia: Optional[bool] = Query(None),
+    garantia_prazo_dias: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Optional[str] = Query(None),
     service: ContratoService = Depends(get_contrato_service),
     user_context: tuple = Depends(get_current_user_with_context)
 ):
     current_user, context = user_context
-    filters = {
-        'gestor_id': gestor_id,
-        'fiscal_id': fiscal_id,
-        'objeto': objeto,
-        'nr_contrato': nr_contrato,
-        'status_id': status_id,
-        'pae': pae,
-        'ano': ano,
-        'vencimento_dias': vencimento_dias,
-        'tem_garantia': tem_garantia,
-        'garantia_prazo_dias': garantia_prazo_dias
-    }
-    active_filters = {k: v for k, v in filters.items() if v is not None}
-
-    # Debug dos filtros recebidos
-    if vencimento_dias:
-        print(f"🔍 BACKEND: Filtro vencimento_dias recebido: {vencimento_dias}")
-    else:
-        print(f"🔍 BACKEND: Nenhum filtro de vencimento recebido")
-
-    if tem_garantia:
-        print(f"🛡️ BACKEND: Filtro tem_garantia recebido: {tem_garantia}")
-        if garantia_prazo_dias:
-            print(f"🛡️ BACKEND: Filtro garantia_prazo_dias recebido: {garantia_prazo_dias}")
-    else:
-        print(f"🛡️ BACKEND: Nenhum filtro de garantia recebido")
-
-    print(f"📡 BACKEND: Filtros ativos: {active_filters}")
-
-    # Criar contexto do usuário para isolamento de dados
-    user_ctx = {
-        'usuario_id': context.usuario_id,
-        'perfil_ativo_nome': context.perfil_ativo_nome
-    }
-
-    return await service.get_all_contratos(page=page, per_page=per_page, filters=active_filters, user_context=user_ctx)
+    active_filters = _build_contratos_filters(
+        gestor_id, fiscal_id, objeto, nr_contrato, status_id, pae, ano,
+        vencimento_dias, tem_garantia, garantia_prazo_dias
+    )
+    order_by = _build_order_by(sort_by, sort_order)
+    user_ctx = {'usuario_id': context.usuario_id, 'perfil_ativo_nome': context.perfil_ativo_nome}
+    return await service.get_all_contratos(page=page, per_page=per_page, filters=active_filters,
+                                           user_context=user_ctx, order_by=order_by)
 
 @router.get("/{contrato_id}", response_model=Contrato)
 async def get_contrato_by_id(
