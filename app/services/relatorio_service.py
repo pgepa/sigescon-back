@@ -92,11 +92,14 @@ class RelatorioService:
 
             # Remove o arquivo antigo fisicamente
             arquivo_antigo = await self.arquivo_repo.find_arquivo_by_id(relatorio_existente['arquivo_id'])
-            if arquivo_antigo and os.path.exists(arquivo_antigo['path_armazenamento']):
-                try:
-                    os.remove(arquivo_antigo['path_armazenamento'])
-                except Exception as e:
-                    print(f"❌ Erro ao remover arquivo antigo: {e}")
+            if arquivo_antigo:
+                from app.services.file_service import FileService
+                path_abs = FileService.resolve_path(arquivo_antigo['path_armazenamento'])
+                if os.path.exists(path_abs):
+                    try:
+                        os.remove(path_abs)
+                    except Exception as e:
+                        print(f"❌ Erro ao remover arquivo antigo: {e}")
 
             # Atualiza o relatório existente
             await self.relatorio_repo.update_relatorio_arquivo(

@@ -18,24 +18,24 @@ class ContratoRepository:
                 nr_contrato, objeto, data_inicio, data_fim, contratado_id,
                 modalidade_id, status_id, gestor_id, fiscal_id,
                 valor_anual, valor_global, base_legal, termos_contratuais,
-                fiscal_substituto_id, pae, doe, data_doe, garantia
+                fiscal_substituto_id, pae, doe, data_doe, garantia,
+                portaria_fiscal, nr_adesao_ata
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
             RETURNING id
         """
 
-        # Converter tipos explicitamente para evitar erros de tipo
         new_contrato_id = await self.conn.fetchval(
             query,
-            str(contrato.nr_contrato),  # Garantir que é string
-            str(contrato.objeto),  # Garantir que é string
+            str(contrato.nr_contrato),
+            str(contrato.objeto),
             contrato.data_inicio,
             contrato.data_fim,
-            int(contrato.contratado_id),  # Garantir que é inteiro
-            int(contrato.modalidade_id),  # Garantir que é inteiro
-            int(contrato.status_id),  # Garantir que é inteiro
-            int(contrato.gestor_id),  # Garantir que é inteiro
-            int(contrato.fiscal_id),  # Garantir que é inteiro
+            int(contrato.contratado_id),
+            int(contrato.modalidade_id),
+            int(contrato.status_id),
+            int(contrato.gestor_id) if contrato.gestor_id is not None else None,
+            int(contrato.fiscal_id) if contrato.fiscal_id is not None else None,
             float(contrato.valor_anual) if contrato.valor_anual is not None else None,
             float(contrato.valor_global) if contrato.valor_global is not None else None,
             str(contrato.base_legal) if contrato.base_legal is not None else None,
@@ -44,7 +44,9 @@ class ContratoRepository:
             str(contrato.pae) if contrato.pae is not None else None,
             str(contrato.doe) if contrato.doe is not None else None,
             contrato.data_doe,
-            contrato.garantia
+            contrato.garantia,
+            str(contrato.portaria_fiscal) if contrato.portaria_fiscal is not None else None,
+            str(contrato.nr_adesao_ata) if contrato.nr_adesao_ata is not None else None,
         )
         return await self.find_contrato_by_id(new_contrato_id)
 
@@ -321,21 +323,24 @@ class ContratoRepository:
 
     # Métodos para gerenciamento de arquivos do contrato
     async def get_arquivos_contrato(self, contrato_id: int) -> List[Dict]:
-        """Busca arquivos do contrato (exclui arquivos de termos aditivos e relatórios)"""
+        """Busca todos os arquivos vinculados ao contrato (contrato, portaria, termo_aditivo)"""
         query = """
             SELECT
-                id,
-                nome_arquivo,
-                tipo_mime as tipo_arquivo,
-                tamanho_bytes,
-                contrato_id,
-                tipo_vinculo,
-                created_at::text as created_at
-            FROM arquivo
-            WHERE contrato_id = $1
-              AND tipo_vinculo = 'contrato'
-              AND ativo = TRUE
-            ORDER BY created_at DESC
+                a.id,
+                a.nome_arquivo,
+                a.tipo_mime as tipo_arquivo,
+                a.tamanho_bytes,
+                a.contrato_id,
+                a.tipo_vinculo,
+                a.created_at::text as created_at,
+                a.termo_aditivo_id,
+                ta.numero_aditivo as termo_aditivo_numero
+            FROM arquivo a
+            LEFT JOIN termo_aditivo ta ON a.termo_aditivo_id = ta.id AND ta.ativo = TRUE
+            WHERE a.contrato_id = $1
+              AND a.tipo_vinculo IN ('contrato', 'portaria', 'ata', 'termo_aditivo')
+              AND a.ativo = TRUE
+            ORDER BY a.tipo_vinculo, a.created_at DESC
         """
         rows = await self.conn.fetch(query, contrato_id)
         return [dict(row) for row in rows]

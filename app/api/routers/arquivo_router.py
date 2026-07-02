@@ -4,6 +4,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
+from app.services.file_service import FileService
 from app.core.database import get_connection
 from app.schemas.usuario_schema import Usuario
 from app.api.dependencies import get_current_user
@@ -41,7 +42,7 @@ async def download_arquivo(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este arquivo.")
 
     # Verificação de existência física
-    path_completo = arquivo.get('path_armazenamento')
+    path_completo = FileService.resolve_path(arquivo.get('path_armazenamento', ''))
     if not os.path.exists(path_completo):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Arquivo físico não encontrado no servidor.")
 
@@ -53,6 +54,39 @@ async def download_arquivo(
         media_type=arquivo.get('tipo_arquivo'),
         content_disposition_type="attachment"
     )
+
+
+@router.get("/portaria/contrato/{contrato_id}")
+async def list_arquivos_portaria(
+    contrato_id: int,
+    conn: asyncpg.Connection = Depends(get_connection),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """
+    Lista todos os arquivos de portaria de designação de um contrato.
+    """
+    checker = PermissionChecker(conn)
+    if not await checker.can_access_contract(current_user, contrato_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este contrato"
+        )
+
+    query = """
+        SELECT id, nome_arquivo, tipo_mime AS tipo_arquivo,
+               tamanho_bytes, contrato_id, created_at::text AS created_at
+        FROM arquivo
+        WHERE contrato_id = $1 AND tipo_vinculo = 'portaria' AND ativo = TRUE
+        ORDER BY created_at DESC
+    """
+    rows = await conn.fetch(query, contrato_id)
+    arquivos = [dict(r) for r in rows]
+
+    return {
+        "arquivos_portaria": arquivos,
+        "total_arquivos": len(arquivos),
+        "contrato_id": contrato_id
+    }
 
 
 @router.get("/relatorios/contrato/{contrato_id}")
