@@ -198,9 +198,11 @@ async def download_modelo_relatorio(
             detail="Arquivo do modelo não encontrado"
         )
     
-    # Retorna o arquivo
+    # Retorna o arquivo (resolve caminho relativo para absoluto)
+    from app.services.file_service import FileService
+    path_completo = FileService.resolve_path(arquivo['caminho'])
     return FileResponse(
-        path=arquivo['caminho'],
+        path=path_completo,
         filename=arquivo['nome_original'],
         media_type='application/octet-stream'
     )

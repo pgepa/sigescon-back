@@ -12,8 +12,8 @@ class ContratoBase(BaseModel):
     contratado_id: int
     modalidade_id: int
     status_id: int
-    gestor_id: int
-    fiscal_id: int
+    gestor_id: Optional[int] = None
+    fiscal_id: Optional[int] = None
     valor_anual: Optional[float] = None
     valor_global: Optional[float] = None
     base_legal: Optional[str] = Field(None, max_length=255)
@@ -23,6 +23,8 @@ class ContratoBase(BaseModel):
     doe: Optional[str] = Field(None, max_length=50)
     data_doe: Optional[date] = None
     garantia: Optional[date] = None
+    portaria_fiscal: Optional[str] = Field(None, max_length=255)
+    nr_adesao_ata: Optional[str] = Field(None, max_length=255)
 
     @field_validator('valor_anual')
     @classmethod
@@ -76,6 +78,8 @@ class ContratoUpdate(BaseModel):
     doe: Optional[str] = Field(None, max_length=50)
     data_doe: Optional[date] = None
     garantia: Optional[date] = None
+    portaria_fiscal: Optional[str] = Field(None, max_length=255)
+    nr_adesao_ata: Optional[str] = Field(None, max_length=255)
 
     @field_validator('valor_anual')
     @classmethod
@@ -123,7 +127,10 @@ class ArquivoContrato(BaseModel):
     tipo_arquivo: Optional[str] = None
     tamanho_bytes: Optional[int] = None
     contrato_id: int
-    created_at: Optional[str] = None  # ISO format datetime string
+    tipo_vinculo: Optional[str] = None
+    termo_aditivo_id: Optional[int] = None
+    termo_aditivo_numero: Optional[int] = None
+    created_at: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

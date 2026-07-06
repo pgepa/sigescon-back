@@ -83,10 +83,11 @@ class TermoAditivoService:
             VALUES ($1, $2, $3, $4, $5, 'termo_aditivo', $6)
             RETURNING id
         """
+        relative_path = str(filepath.relative_to(BASE_DIR)).replace("\\", "/")
         arquivo_id = await self.repo.conn.fetchval(
             insert_query,
             arquivo.filename,
-            str(filepath),  # garante string no banco
+            relative_path,
             len(content),
             arquivo.content_type,
             contrato_id,

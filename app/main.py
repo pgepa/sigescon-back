@@ -21,6 +21,8 @@ from app.api.routers import (
 from app.api.routers import relatorio_fiscalizacao_router
 from app.api.routers import usuario_perfil_router
 from app.api.routers import termo_aditivo_router
+from app.api.routers import contrato_responsavel_router
+from app.api.routers import public_router
 # Imports dos sistemas avançados
 from app.core.database import get_db_pool, close_db_pool
 from app.core.config import settings
@@ -176,7 +178,7 @@ async def add_process_time_header(request: Request, call_next):
     response.headers["X-Process-Time"] = str(process_time)
     response.headers["X-Request-ID"] = request.state.request_id
     
-    return response
+    return response 
 
 # === EXCEPTION HANDLERS ===
 
@@ -216,6 +218,12 @@ except Exception as e:
     print(f"Erro ao registrar router de contratados: {e}")
     import traceback
     traceback.print_exc()
+
+app.include_router(public_router.router, prefix=API_PREFIX)
+print(f"✅ Router público registrado: {API_PREFIX}/public/...")
+
+app.include_router(contrato_responsavel_router.router, prefix=API_PREFIX)
+print(f"✅ Router de responsáveis registrado: {API_PREFIX}/contratos/{{id}}/responsaveis")
 
 app.include_router(contrato_router.router, prefix=API_PREFIX)
 print(f"✅ Router de contratos registrado: {API_PREFIX}/contratos")
