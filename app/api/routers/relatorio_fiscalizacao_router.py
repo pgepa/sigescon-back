@@ -56,7 +56,7 @@ async def listar_relatorios_para_gestor(
     contrato_id: int,
     db: Connection = Depends(get_connection),
 ):
-    """Lista relatórios visíveis ao gestor — somente os que o fiscal enviou."""
+    """Lista relatórios visíveis ao gestor — inclui rascunhos para acompanhamento."""
     try:
         repo = RelatorioRepository(db)
         rows = await repo.get_relatorios_para_gestor(contrato_id)
@@ -182,6 +182,29 @@ async def salvar_relatorio(
         raise HTTPException(status_code=500, detail=f"Erro ao salvar relatório: {str(e)}")
 
 
+@router.post("/salvar-contrato/{contrato_id}")
+async def salvar_relatorio_por_contrato_id(
+    contrato_id: int,
+    dados_form: RelatorioSalvarSchema,
+    db: Connection = Depends(get_connection),
+):
+    """Mesmo que /salvar/{nr_contrato}, mas recebe o ID numérico do contrato.
+
+    nr_contrato costuma conter uma barra (ex: "30/2025"), o que alguns proxies
+    (Apache em produção) não repassam corretamente mesmo codificada como %2F.
+    Usar o ID evita esse problema por completo — prefira esta rota no front-end.
+    """
+    try:
+        repo = RelatorioRepository(db)
+        await repo.get_dados_contrato_completo_by_id(contrato_id)
+        novo_id = await repo.salvar_relatorio(contrato_id, dados_form)
+        return {"id": novo_id, "status": dados_form.status, "mensagem": "Salvo com sucesso."}
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar relatório: {str(e)}")
+
+
 @router.post("/gerar-pdf/{nr_contrato:path}")
 async def gerar_relatorio_pdf(
     nr_contrato: str,
@@ -202,6 +225,34 @@ async def gerar_relatorio_pdf(
             path=pdf_path,
             media_type="application/pdf",
             filename=f"Fiscalizacao_{nome_seguro}.pdf",
+        )
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro interno ao gerar o PDF: {str(e)}")
+
+
+@router.post("/gerar-pdf-contrato/{contrato_id}")
+async def gerar_relatorio_pdf_por_contrato_id(
+    contrato_id: int,
+    dados_form: RelatorioCreateSchema,
+    background_tasks: BackgroundTasks,
+    db: Connection = Depends(get_connection),
+):
+    """Mesmo que /gerar-pdf/{nr_contrato}, mas recebe o ID numérico do contrato
+    (evita o problema de barra em nr_contrato via proxy/Apache — prefira esta rota)."""
+    try:
+        repo = RelatorioRepository(db)
+        service = RelatorioService(repo)
+
+        pdf_path, docx_path = await service.gerar_pdf_por_contrato_id(contrato_id, dados_form)
+        background_tasks.add_task(cleanup_files, pdf_path, docx_path)
+
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            filename=f"Fiscalizacao_Contrato_{contrato_id}.pdf",
         )
 
     except HTTPException as http_exc:
