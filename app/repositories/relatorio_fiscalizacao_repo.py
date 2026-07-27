@@ -6,30 +6,45 @@ class RelatorioRepository:
     def __init__(self, db: Connection):
         self.db = db
 
+    _DADOS_CONTRATO_QUERY = """
+        SELECT
+            c.id AS contrato_id,
+            c.nr_contrato,
+            c.pae,
+            c.objeto,
+            c.data_inicio,
+            c.data_fim,
+            c.valor_global,
+            emp.nome AS empresa_nome,
+            emp.cnpj AS empresa_cnpj,
+            fiscal.nome AS fiscal_nome,
+            fiscal.matricula AS numero_matricula,
+            fiscal.email AS fiscal_email,
+            gestor.nome AS gestor_nome,
+            gestor.email AS gestor_email
+        FROM contrato c
+        LEFT JOIN contratado emp ON c.contratado_id = emp.id
+        LEFT JOIN usuario fiscal ON c.fiscal_id = fiscal.id
+        LEFT JOIN usuario gestor ON c.gestor_id = gestor.id
+        WHERE {where}
+    """
+
     async def get_dados_contrato_completo(self, nr_contrato: str):
-        query = """
-            SELECT
-                c.id AS contrato_id,
-                c.nr_contrato,
-                c.pae,
-                c.objeto,
-                c.data_inicio,
-                c.data_fim,
-                c.valor_global,
-                emp.nome AS empresa_nome,
-                emp.cnpj AS empresa_cnpj,
-                fiscal.nome AS fiscal_nome,
-                fiscal.matricula AS numero_matricula,
-                fiscal.email AS fiscal_email,
-                gestor.nome AS gestor_nome,
-                gestor.email AS gestor_email
-            FROM contrato c
-            LEFT JOIN contratado emp ON c.contratado_id = emp.id
-            LEFT JOIN usuario fiscal ON c.fiscal_id = fiscal.id
-            LEFT JOIN usuario gestor ON c.gestor_id = gestor.id
-            WHERE c.nr_contrato = $1
-        """
+        query = self._DADOS_CONTRATO_QUERY.format(where="c.nr_contrato = $1")
         resultado = await self.db.fetchrow(query, nr_contrato)
+        if not resultado:
+            raise HTTPException(status_code=404, detail="Contrato não encontrado no banco de dados.")
+        return resultado
+
+    async def get_dados_contrato_completo_by_id(self, contrato_id: int):
+        """Mesma consulta acima, mas pelo ID numérico do contrato.
+
+        nr_contrato costuma conter uma barra (ex: "30/2025"), o que quebra em
+        proxies/Apache que não repassam "%2F" corretamente na URL. Usar o ID
+        evita esse problema por completo.
+        """
+        query = self._DADOS_CONTRATO_QUERY.format(where="c.id = $1")
+        resultado = await self.db.fetchrow(query, contrato_id)
         if not resultado:
             raise HTTPException(status_code=404, detail="Contrato não encontrado no banco de dados.")
         return resultado
@@ -64,7 +79,7 @@ class RelatorioRepository:
         return await self.db.fetch(query, contrato_id)
 
     async def get_relatorios_para_gestor(self, contrato_id: int):
-        """Retorna apenas relatórios enviados ou já revisados — rascunhos ficam ocultos.
+        """Retorna todos os relatórios do contrato, incluindo rascunhos, para acompanhamento do gestor/admin.
         Inclui 'finalizado' para compatibilidade com registros anteriores à migração."""
         cols = await self._colunas_existem("updated_at", "gestor_observacao")
         extra = ""
@@ -76,7 +91,7 @@ class RelatorioRepository:
             SELECT id, periodo_inicio, periodo_fim, data_relatorio, status, created_at{extra}
             FROM relatorio_fiscalizacao
             WHERE contrato_id = $1
-              AND status IN ('enviado', 'aprovado', 'nao_conforme', 'finalizado')
+              AND status IN ('rascunho', 'enviado', 'aprovado', 'nao_conforme', 'finalizado')
             ORDER BY created_at DESC
         """
         return await self.db.fetch(query, contrato_id)

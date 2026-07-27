@@ -207,6 +207,12 @@ class RelatorioService:
         contexto = self._build_contexto(dados_banco, form_dict)
         return self._render_docx_to_pdf(contexto)
 
+    async def gerar_pdf_por_contrato_id(self, contrato_id: int, dados_form: RelatorioCreateSchema):
+        dados_banco = await self.repo.get_dados_contrato_completo_by_id(contrato_id)
+        form_dict = dados_form.model_dump()
+        contexto = self._build_contexto(dados_banco, form_dict)
+        return self._render_docx_to_pdf(contexto)
+
     async def gerar_pdf_por_id(self, relatorio_id: int):
         relatorio = await self.repo.get_relatorio_by_id(relatorio_id)
         dados_banco = await self.repo.get_dados_contrato_completo(relatorio['nr_contrato'])
