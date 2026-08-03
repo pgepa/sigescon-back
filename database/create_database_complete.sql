@@ -760,6 +760,7 @@ CREATE TABLE public.termo_aditivo (
     objeto text NOT NULL,
     data_assinatura date NOT NULL,
     data_publicacao date,
+    data_inicio date,
     nova_data_fim date,
     valor_acrescimo numeric(15,2),
     valor_supressao numeric(15,2),

@@ -29,15 +29,15 @@ class TermoAditivoRepository:
         query = """
             INSERT INTO termo_aditivo (
                 contrato_id, numero_aditivo, tipo, objeto,
-                data_assinatura, data_publicacao, nova_data_fim,
+                data_assinatura, data_publicacao, data_inicio, nova_data_fim,
                 valor_acrescimo, valor_supressao, pae, observacoes, ativo
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, TRUE)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE)
             RETURNING id
         """
         new_id = await self.conn.fetchval(
             query,
             contrato_id, numero, dados.tipo, dados.objeto,
-            dados.data_assinatura, dados.data_publicacao, dados.nova_data_fim,
+            dados.data_assinatura, dados.data_publicacao, dados.data_inicio, dados.nova_data_fim,
             dados.valor_acrescimo, dados.valor_supressao, dados.pae, dados.observacoes
         )
         return await self.get_by_id(new_id)

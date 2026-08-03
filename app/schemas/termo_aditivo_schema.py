@@ -10,6 +10,7 @@ class TermoAditivoBase(BaseModel):
     objeto: str = Field(..., description="Descrição do objeto do aditivo")
     data_assinatura: date
     data_publicacao: Optional[date] = None
+    data_inicio: Optional[date] = None
     nova_data_fim: Optional[date] = None
     valor_acrescimo: Optional[float] = None
     valor_supressao: Optional[float] = None
@@ -40,6 +41,7 @@ class TermoAditivoUpdate(BaseModel):
     objeto: Optional[str] = None
     data_assinatura: Optional[date] = None
     data_publicacao: Optional[date] = None
+    data_inicio: Optional[date] = None
     nova_data_fim: Optional[date] = None
     valor_acrescimo: Optional[float] = None
     valor_supressao: Optional[float] = None
