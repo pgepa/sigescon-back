@@ -83,7 +83,7 @@ class TermoAditivoRepository:
         return results
 
     async def update(self, aditivo_id: int, dados: TermoAditivoUpdate) -> Optional[Dict]:
-        fields = dados.model_dump(exclude_none=True)
+        fields = dados.model_dump(exclude_unset=True)
         if not fields:
             return await self.get_by_id(aditivo_id)
 

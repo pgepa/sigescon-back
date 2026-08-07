@@ -175,7 +175,7 @@ class DashboardRepository:
             JOIN statuspendencia sp ON p.status_pendencia_id = sp.id
             WHERE
                 c.ativo = true
-                AND c.fiscal_id = $1
+                AND (c.fiscal_id = $1 OR c.fiscal_substituto_id = $1)
                 AND sp.nome = 'Pendente'
             ORDER BY
                 CASE WHEN p.data_prazo < CURRENT_DATE THEN 0 ELSE 1 END,
@@ -869,13 +869,15 @@ class DashboardRepository:
             }
 
             # 1. Minhas pendências (ativas)
+            # Inclui contratos onde o usuário é fiscal titular OU fiscal substituto
             if all(table in table_names for table in ['contrato', 'pendenciarelatorio', 'statuspendencia']):
                 query = """
                     SELECT COUNT(*)
                     FROM pendenciarelatorio p
                     JOIN contrato c ON p.contrato_id = c.id
                     JOIN statuspendencia sp ON p.status_pendencia_id = sp.id
-                    WHERE c.fiscal_id = $1 AND c.ativo = true AND sp.nome = 'Pendente'
+                    WHERE (c.fiscal_id = $1 OR c.fiscal_substituto_id = $1)
+                    AND c.ativo = true AND sp.nome = 'Pendente'
                 """
                 result = await self.conn.fetchval(query, fiscal_id)
                 metrics['minhas_pendencias'] = result or 0
@@ -887,7 +889,7 @@ class DashboardRepository:
                     FROM pendenciarelatorio p
                     JOIN contrato c ON p.contrato_id = c.id
                     JOIN statuspendencia sp ON p.status_pendencia_id = sp.id
-                    WHERE c.fiscal_id = $1 AND c.ativo = true
+                    WHERE (c.fiscal_id = $1 OR c.fiscal_substituto_id = $1) AND c.ativo = true
                     AND sp.nome = 'Pendente' AND p.data_prazo < CURRENT_DATE
                 """
                 result = await self.conn.fetchval(query, fiscal_id)
@@ -899,18 +901,19 @@ class DashboardRepository:
                     SELECT COUNT(*)
                     FROM relatoriofiscal r
                     JOIN contrato c ON r.contrato_id = c.id
-                    WHERE c.fiscal_id = $1
+                    WHERE (c.fiscal_id = $1 OR c.fiscal_substituto_id = $1)
                 """
                 result = await self.conn.fetchval(query, fiscal_id)
                 metrics['relatorios_enviados'] = result or 0
 
-            # 4. Contratos ativos onde sou fiscal (apenas status "Ativo")
+            # 4. Contratos ativos onde sou fiscal titular ou substituto (apenas status "Ativo")
             if 'contrato' in table_names:
                 query = """
                     SELECT COUNT(*)
                     FROM contrato c
                     JOIN status s ON c.status_id = s.id
-                    WHERE c.fiscal_id = $1 AND c.ativo = true AND s.nome = 'Ativo'
+                    WHERE (c.fiscal_id = $1 OR c.fiscal_substituto_id = $1)
+                    AND c.ativo = true AND s.nome = 'Ativo'
                 """
                 result = await self.conn.fetchval(query, fiscal_id)
                 metrics['contratos_ativos'] = result or 0
@@ -922,7 +925,7 @@ class DashboardRepository:
                     FROM pendenciarelatorio p
                     JOIN contrato c ON p.contrato_id = c.id
                     JOIN statuspendencia sp ON p.status_pendencia_id = sp.id
-                    WHERE c.fiscal_id = $1 AND c.ativo = true
+                    WHERE (c.fiscal_id = $1 OR c.fiscal_substituto_id = $1) AND c.ativo = true
                     AND sp.nome = 'Pendente'
                     AND p.data_prazo BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '7 days')
                 """
@@ -936,7 +939,8 @@ class DashboardRepository:
                     FROM relatoriofiscal r
                     JOIN contrato c ON r.contrato_id = c.id
                     JOIN statusrelatorio sr ON r.status_id = sr.id
-                    WHERE c.fiscal_id = $1 AND sr.nome = 'Rejeitado com Pendência'
+                    WHERE (c.fiscal_id = $1 OR c.fiscal_substituto_id = $1)
+                    AND sr.nome = 'Rejeitado com Pendência'
                 """
                 result = await self.conn.fetchval(query, fiscal_id)
                 metrics['relatorios_rejeitados'] = result or 0
