@@ -228,12 +228,12 @@ async def list_contratos_with_slash(
     )
 
 def _build_contratos_filters(gestor_id, fiscal_id, objeto, nr_contrato, status_id, pae, ano,
-                              vencimento_dias, tem_garantia, garantia_prazo_dias):
+                              vencimento_dias, tem_garantia, garantia_prazo_dias, contratado_nome=None):
     filters = {
         'gestor_id': gestor_id, 'fiscal_id': fiscal_id, 'objeto': objeto,
         'nr_contrato': nr_contrato, 'status_id': status_id, 'pae': pae, 'ano': ano,
         'vencimento_dias': vencimento_dias, 'tem_garantia': tem_garantia,
-        'garantia_prazo_dias': garantia_prazo_dias
+        'garantia_prazo_dias': garantia_prazo_dias, 'contratado_nome': contratado_nome
     }
     return {k: v for k, v in filters.items() if v is not None}
 
@@ -244,6 +244,7 @@ def _build_order_by(sort_by: Optional[str], sort_order: Optional[str]) -> str:
         'contratado_nome': 'ct.nome',
         'data_fim': 'c.data_fim',
         'objeto': 'c.objeto',
+        'total_aditivos': '(SELECT COUNT(*) FROM termo_aditivo ta WHERE ta.contrato_id = c.id AND ta.ativo = TRUE)',
     }
     col = allowed.get(sort_by, 'c.data_fim') if sort_by else 'c.data_fim'
     direction = 'ASC' if sort_order and sort_order.lower() == 'asc' else 'DESC'
@@ -262,6 +263,7 @@ async def list_contratos(
     status_id: Optional[int] = Query(None),
     pae: Optional[str] = Query(None),
     ano: Optional[int] = Query(None),
+    contratado_nome: Optional[str] = Query(None),
     vencimento_dias: Optional[str] = Query(None),
     tem_garantia: Optional[bool] = Query(None),
     garantia_prazo_dias: Optional[str] = Query(None),
@@ -273,7 +275,7 @@ async def list_contratos(
     current_user, context = user_context
     active_filters = _build_contratos_filters(
         gestor_id, fiscal_id, objeto, nr_contrato, status_id, pae, ano,
-        vencimento_dias, tem_garantia, garantia_prazo_dias
+        vencimento_dias, tem_garantia, garantia_prazo_dias, contratado_nome
     )
     order_by = _build_order_by(sort_by, sort_order)
     user_ctx = {'usuario_id': context.usuario_id, 'perfil_ativo_nome': context.perfil_ativo_nome}
@@ -292,6 +294,7 @@ async def list_contratos_without_slash(
     status_id: Optional[int] = Query(None),
     pae: Optional[str] = Query(None),
     ano: Optional[int] = Query(None),
+    contratado_nome: Optional[str] = Query(None),
     vencimento_dias: Optional[str] = Query(None),
     tem_garantia: Optional[bool] = Query(None),
     garantia_prazo_dias: Optional[str] = Query(None),
@@ -303,7 +306,7 @@ async def list_contratos_without_slash(
     current_user, context = user_context
     active_filters = _build_contratos_filters(
         gestor_id, fiscal_id, objeto, nr_contrato, status_id, pae, ano,
-        vencimento_dias, tem_garantia, garantia_prazo_dias
+        vencimento_dias, tem_garantia, garantia_prazo_dias, contratado_nome
     )
     order_by = _build_order_by(sort_by, sort_order)
     user_ctx = {'usuario_id': context.usuario_id, 'perfil_ativo_nome': context.perfil_ativo_nome}
