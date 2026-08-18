@@ -96,11 +96,36 @@ class TermoAditivoRepository:
         return await self.get_by_id(aditivo_id)
 
     async def delete(self, aditivo_id: int) -> bool:
+        """Exclusão lógica (inativar) — o registro continua existindo e visível na
+        listagem, só marcado como ativo = FALSE."""
         result = await self.conn.execute(
             "UPDATE termo_aditivo SET ativo = FALSE, updated_at = NOW() WHERE id = $1 AND ativo IS NOT FALSE",
             aditivo_id
         )
         return result == "UPDATE 1"
+
+    async def hard_delete(self, aditivo_id: int, contrato_id: int) -> bool:
+        """Exclusão definitiva — remove o registro do banco (diferente de `delete`,
+        que só inativa). Funciona independente do estado atual de `ativo`, para
+        permitir excluir de vez um aditivo que já tinha sido inativado antes.
+
+        termo_aditivo e arquivo têm referência circular (termo_aditivo.arquivo_id
+        aponta pro arquivo, e arquivo.termo_aditivo_id aponta de volta) — por isso
+        primeiro zera termo_aditivo.arquivo_id, só depois consegue apagar o arquivo
+        e, por fim, o próprio termo_aditivo, sem violar nenhuma das duas FKs.
+        """
+        async with self.conn.transaction():
+            await self.conn.execute(
+                "UPDATE termo_aditivo SET arquivo_id = NULL WHERE id = $1", aditivo_id
+            )
+            await self.conn.execute(
+                "DELETE FROM arquivo WHERE termo_aditivo_id = $1", aditivo_id
+            )
+            result = await self.conn.execute(
+                "DELETE FROM termo_aditivo WHERE id = $1 AND contrato_id = $2",
+                aditivo_id, contrato_id
+            )
+        return result == "DELETE 1"
 
     async def vincular_arquivo(self, aditivo_id: int, arquivo_id: int) -> Optional[Dict]:
         await self.conn.execute(

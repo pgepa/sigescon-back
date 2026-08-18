@@ -25,9 +25,16 @@ class TermoAditivoService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contrato não encontrado")
         return contrato
 
+    async def _sincronizar_vigencia_contrato(self, contrato_id: int, dados) -> None:
+        """Estende contrato.data_fim (e reabre o status se necessário) quando o
+        aditivo é de Prazo/Misto e informa uma nova data fim."""
+        if dados.tipo in ("Prazo", "Misto") and dados.nova_data_fim:
+            await self.contrato_repo.atualizar_vigencia_por_aditivo(contrato_id, dados.nova_data_fim)
+
     async def criar(self, contrato_id: int, dados: TermoAditivoCreate) -> TermoAditivo:
         await self._verificar_contrato(contrato_id)
         novo = await self.repo.create(contrato_id, dados)
+        await self._sincronizar_vigencia_contrato(contrato_id, dados)
         return TermoAditivo.model_validate(novo)
 
     async def listar_por_contrato(self, contrato_id: int) -> List[TermoAditivo]:
@@ -45,14 +52,26 @@ class TermoAditivoService:
     async def atualizar(self, contrato_id: int, aditivo_id: int, dados: TermoAditivoUpdate) -> TermoAditivo:
         await self.buscar_por_id(contrato_id, aditivo_id)
         atualizado = await self.repo.update(aditivo_id, dados)
+        await self._sincronizar_vigencia_contrato(contrato_id, dados)
         return TermoAditivo.model_validate(atualizado)
 
     async def excluir(self, contrato_id: int, aditivo_id: int) -> dict:
+        """Inativa o termo aditivo (soft delete) — continua existindo e visível na lista."""
         await self.buscar_por_id(contrato_id, aditivo_id)
         ok = await self.repo.delete(aditivo_id)
         if not ok:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro ao excluir termo aditivo")
-        return {"message": "Termo aditivo excluído com sucesso"}
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro ao inativar termo aditivo")
+        return {"message": "Termo aditivo inativado com sucesso"}
+
+    async def excluir_definitivamente(self, contrato_id: int, aditivo_id: int) -> dict:
+        """Exclusão definitiva — remove o termo aditivo do banco de vez. Funciona
+        mesmo se ele já estiver inativo (por isso não usa buscar_por_id, que só
+        acha registros ativos)."""
+        await self._verificar_contrato(contrato_id)
+        ok = await self.repo.hard_delete(aditivo_id, contrato_id)
+        if not ok:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Termo aditivo não encontrado")
+        return {"message": "Termo aditivo excluído definitivamente"}
 
     async def upload_arquivo(
         self,

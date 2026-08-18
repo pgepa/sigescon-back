@@ -69,15 +69,28 @@ async def atualizar_aditivo(
     return await service.atualizar(contrato_id, aditivo_id, dados)
 
 
-@router.delete("/{aditivo_id}", status_code=status.HTTP_200_OK, summary="Excluir termo aditivo")
+@router.delete("/{aditivo_id}", status_code=status.HTTP_200_OK, summary="Inativar termo aditivo")
 async def excluir_aditivo(
     contrato_id: int,
     aditivo_id: int,
     service: TermoAditivoService = Depends(get_service),
     current_user: Usuario = Depends(require_admin_or_manager),
 ):
-    """Exclusão lógica (soft delete). Requer Administrador ou Gestor."""
+    """Exclusão lógica (soft delete) — o registro continua existindo e visível na
+    lista, marcado como inativo. Requer Administrador ou Gestor."""
     return await service.excluir(contrato_id, aditivo_id)
+
+
+@router.delete("/{aditivo_id}/permanente", status_code=status.HTTP_200_OK, summary="Excluir termo aditivo definitivamente")
+async def excluir_aditivo_definitivamente(
+    contrato_id: int,
+    aditivo_id: int,
+    service: TermoAditivoService = Depends(get_service),
+    current_user: Usuario = Depends(admin_required),
+):
+    """Exclusão definitiva — remove o registro do banco de dados. Ação irreversível,
+    requer Administrador."""
+    return await service.excluir_definitivamente(contrato_id, aditivo_id)
 
 
 @router.post("/{aditivo_id}/arquivo", response_model=TermoAditivo, summary="Fazer upload de arquivo do aditivo")

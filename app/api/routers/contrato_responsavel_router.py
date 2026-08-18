@@ -35,6 +35,39 @@ def get_responsavel_service(
     )
 
 
+# --- Relatório de contratos com seus responsáveis ---
+# IMPORTANTE: essa rota estática precisa vir ANTES de "/{contrato_id}/responsaveis" —
+# senão o FastAPI casa "relatorio" como se fosse o contrato_id (rota parametrizada
+# registrada primeiro vence), e falha ao converter "relatorio" para int.
+
+@router.get(
+    "/relatorio/responsaveis",
+    response_model=RelatorioResponsaveisPaginated,
+    summary="Relatório de contratos com fiscais e gestores atuais",
+)
+async def relatorio_responsaveis(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=100),
+    nr_contrato: Optional[str] = Query(None, description="Filtrar por número do contrato"),
+    objeto: Optional[str] = Query(None, description="Filtrar por objeto"),
+    status_id: Optional[int] = Query(None, description="Filtrar por status"),
+    gestor_nome: Optional[str] = Query(None, description="Filtrar por nome do gestor"),
+    fiscal_nome: Optional[str] = Query(None, description="Filtrar por nome do fiscal"),
+    service: ContratoResponsavelService = Depends(get_responsavel_service),
+    current_user: Usuario = Depends(get_current_user),
+):
+    filters = {
+        k: v for k, v in {
+            'nr_contrato': nr_contrato,
+            'objeto': objeto,
+            'status_id': status_id,
+            'gestor_nome': gestor_nome,
+            'fiscal_nome': fiscal_nome,
+        }.items() if v is not None
+    }
+    return await service.relatorio_responsaveis(page, per_page, filters or None)
+
+
 # --- CRUD de responsáveis por contrato ---
 
 @router.get(
@@ -95,33 +128,3 @@ async def remover_responsavel(
 ):
     await service.remover_responsavel(contrato_id, responsavel_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-# --- Relatório de contratos com seus responsáveis ---
-
-@router.get(
-    "/relatorio/responsaveis",
-    response_model=RelatorioResponsaveisPaginated,
-    summary="Relatório de contratos com fiscais e gestores atuais",
-)
-async def relatorio_responsaveis(
-    page: int = Query(1, ge=1),
-    per_page: int = Query(10, ge=1, le=100),
-    nr_contrato: Optional[str] = Query(None, description="Filtrar por número do contrato"),
-    objeto: Optional[str] = Query(None, description="Filtrar por objeto"),
-    status_id: Optional[int] = Query(None, description="Filtrar por status"),
-    gestor_nome: Optional[str] = Query(None, description="Filtrar por nome do gestor"),
-    fiscal_nome: Optional[str] = Query(None, description="Filtrar por nome do fiscal"),
-    service: ContratoResponsavelService = Depends(get_responsavel_service),
-    current_user: Usuario = Depends(get_current_user),
-):
-    filters = {
-        k: v for k, v in {
-            'nr_contrato': nr_contrato,
-            'objeto': objeto,
-            'status_id': status_id,
-            'gestor_nome': gestor_nome,
-            'fiscal_nome': fiscal_nome,
-        }.items() if v is not None
-    }
-    return await service.relatorio_responsaveis(page, per_page, filters or None)

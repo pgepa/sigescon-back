@@ -152,42 +152,15 @@ class ContratoResponsavelRepository:
         limit: int = 10,
         offset: int = 0
     ) -> Tuple[List[Dict], int]:
+        # Nota: a tabela contrato_responsavel (histórico de designações) não existe no
+        # banco atual — os responsáveis atuais são lidos direto das colunas de contrato,
+        # que é a fonte usada em todo o resto do sistema (dashboard, listagem etc.).
         base_query = """
             FROM contrato c
             LEFT JOIN status s ON c.status_id = s.id
-            LEFT JOIN LATERAL (
-                SELECT cr.usuario_id, u.nome
-                FROM contrato_responsavel cr
-                JOIN usuario u ON cr.usuario_id = u.id
-                WHERE cr.contrato_id = c.id
-                  AND cr.tipo = 'gestor'
-                  AND cr.data_fim IS NULL
-                  AND cr.ativo = TRUE
-                ORDER BY cr.data_inicio DESC
-                LIMIT 1
-            ) gestor_atual ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT cr.usuario_id, u.nome
-                FROM contrato_responsavel cr
-                JOIN usuario u ON cr.usuario_id = u.id
-                WHERE cr.contrato_id = c.id
-                  AND cr.tipo = 'fiscal'
-                  AND cr.data_fim IS NULL
-                  AND cr.ativo = TRUE
-                ORDER BY cr.data_inicio DESC
-                LIMIT 1
-            ) fiscal_atual ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT cr.usuario_id, u.nome
-                FROM contrato_responsavel cr
-                JOIN usuario u ON cr.usuario_id = u.id
-                WHERE cr.contrato_id = c.id
-                  AND cr.tipo = 'fiscal_substituto'
-                  AND cr.data_fim IS NULL
-                  AND cr.ativo = TRUE
-                ORDER BY cr.data_inicio DESC
-                LIMIT 1
-            ) fiscal_sub_atual ON TRUE
+            LEFT JOIN usuario gestor_atual ON c.gestor_id = gestor_atual.id
+            LEFT JOIN usuario fiscal_atual ON c.fiscal_id = fiscal_atual.id
+            LEFT JOIN usuario fiscal_sub_atual ON c.fiscal_substituto_id = fiscal_sub_atual.id
         """
 
         where_clauses = ["c.ativo = TRUE"]
@@ -230,11 +203,11 @@ class ContratoResponsavelRepository:
                 c.data_fim,
                 s.nome AS status_nome,
                 gestor_atual.nome AS gestor_atual_nome,
-                gestor_atual.usuario_id AS gestor_atual_id,
+                gestor_atual.id AS gestor_atual_id,
                 fiscal_atual.nome AS fiscal_atual_nome,
-                fiscal_atual.usuario_id AS fiscal_atual_id,
+                fiscal_atual.id AS fiscal_atual_id,
                 fiscal_sub_atual.nome AS fiscal_substituto_atual_nome,
-                fiscal_sub_atual.usuario_id AS fiscal_substituto_atual_id
+                fiscal_sub_atual.id AS fiscal_substituto_atual_id
             {base_query}{where_sql}
             ORDER BY c.nr_contrato ASC
             LIMIT ${idx} OFFSET ${idx + 1}

@@ -2,6 +2,7 @@
 # Endpoints públicos sem autenticação — usados pelo Relatório de Contratos
 import os
 import asyncpg
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from typing import Optional
@@ -10,6 +11,7 @@ from app.core.database import get_connection
 from app.repositories.contrato_repo import ContratoRepository
 from app.repositories.status_repo import StatusRepository
 from app.repositories.contratado_repo import ContratadoRepository
+from app.repositories.modalidade_repo import ModalidadeRepository
 from app.repositories.termo_aditivo_repo import TermoAditivoRepository
 from app.services.file_service import FileService
 
@@ -27,24 +29,35 @@ async def public_list_contratos(
     per_page: int = Query(10, ge=1, le=100),
     status_id: Optional[int] = Query(None),
     contratado_id: Optional[int] = Query(None),
+    modalidade_id: Optional[int] = Query(None),
     nr_contrato: Optional[str] = Query(None),
     objeto: Optional[str] = Query(None),
-    data_inicio: Optional[str] = Query(None),
-    data_fim: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="Busca livre por nº contrato, objeto ou contratado"),
+    data_inicio: Optional[date] = Query(None, description="Vigência inicia em ou após essa data"),
+    data_fim: Optional[date] = Query(None, description="Vigência termina em ou antes dessa data"),
     conn: asyncpg.Connection = Depends(get_connection),
 ):
     repo = ContratoRepository(conn)
     filters = {k: v for k, v in {
         "status_id": status_id,
         "contratado_id": contratado_id,
+        "modalidade_id": modalidade_id,
         "nr_contrato": nr_contrato,
         "objeto": objeto,
+        "search": search,
+        "data_inicio": data_inicio,
+        "data_fim": data_fim,
     }.items() if v is not None}
 
     import math
     offset = (page - 1) * per_page
+    # Sem filtro de data: mostra os contratos mais novos primeiro (uso normal de navegação).
+    # Com filtro de Data Início/Fim: ordena a partir da data filtrada, para que os
+    # resultados mais próximos do que foi buscado apareçam nas primeiras linhas.
+    order_by = "c.data_inicio ASC" if (data_inicio or data_fim) else "c.data_inicio DESC"
     contratos, total = await repo.get_all_contratos(
-        filters=filters, limit=per_page, offset=offset
+        filters=filters, limit=per_page, offset=offset,
+        order_by=order_by,
     )
     total_pages = math.ceil(total / per_page) if total > 0 else 1
     return {
@@ -136,3 +149,11 @@ async def public_get_contratados(
     repo = ContratadoRepository(conn)
     contratados = await repo.get_all_contratados()
     return {"data": contratados, "total": len(contratados)}
+
+
+@router.get("/modalidades")
+async def public_get_modalidades(
+    conn: asyncpg.Connection = Depends(get_connection),
+):
+    repo = ModalidadeRepository(conn)
+    return await repo.get_all_modalidades()

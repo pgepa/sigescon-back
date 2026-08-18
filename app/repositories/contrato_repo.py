@@ -152,6 +152,23 @@ class ContratoRepository:
                     where_clauses.append(f"ct.nome ILIKE ${param_idx}")
                     params.append(f"%{value}%")
                     param_idx += 1
+                elif key == 'search':
+                    # Busca livre: bate em número do contrato, objeto ou nome do contratado
+                    where_clauses.append(
+                        f"(c.nr_contrato ILIKE ${param_idx} OR c.objeto ILIKE ${param_idx} OR ct.nome ILIKE ${param_idx})"
+                    )
+                    params.append(f"%{value}%")
+                    param_idx += 1
+                elif key == 'data_inicio':
+                    # Contratos cuja vigência começa em ou após essa data
+                    where_clauses.append(f"c.data_inicio >= ${param_idx}")
+                    params.append(value)
+                    param_idx += 1
+                elif key == 'data_fim':
+                    # Contratos cuja vigência termina em ou antes dessa data
+                    where_clauses.append(f"c.data_fim <= ${param_idx}")
+                    params.append(value)
+                    param_idx += 1
                 elif key == 'vencimento_dias':
                     # Filtro por proximidade de vencimento (cumulativo - "ou menos")
                     # Considera apenas contratos com status "Ativo"
@@ -283,6 +300,29 @@ class ContratoRepository:
             logger.error(f"ERRO CRÍTICO - Contrato {contrato_id}: {e}")
             raise
 
+
+    async def atualizar_vigencia_por_aditivo(self, contrato_id: int, nova_data_fim) -> None:
+        """
+        Reflete no contrato a extensão de vigência de um termo aditivo de Prazo/Misto.
+        Só estende data_fim (nunca reduz, para não sobrescrever com um aditivo mais
+        antigo/menor por engano) e, se o contrato estava "Encerrado" e a nova data
+        ainda não venceu, reabre automaticamente para "Ativo". Não mexe em contratos
+        "Suspenso"/"Cancelado" — esses continuam sendo decisão manual.
+        """
+        query = """
+            UPDATE contrato
+            SET
+                data_fim = $2,
+                status_id = CASE
+                    WHEN status_id = (SELECT id FROM status WHERE nome = 'Encerrado')
+                         AND $2::date >= CURRENT_DATE
+                    THEN (SELECT id FROM status WHERE nome = 'Ativo')
+                    ELSE status_id
+                END,
+                updated_at = NOW()
+            WHERE id = $1 AND $2::date > data_fim
+        """
+        await self.conn.execute(query, contrato_id, nova_data_fim)
 
     async def delete_contrato(self, contrato_id: int) -> bool:
         """
