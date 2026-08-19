@@ -133,3 +133,71 @@ class TermoAditivoRepository:
             arquivo_id, aditivo_id
         )
         return await self.get_by_id(aditivo_id)
+
+    async def get_relatorio_aditivos(
+        self,
+        filters: Optional[Dict] = None,
+        limit: int = 15,
+        offset: int = 0,
+    ) -> tuple[List[Dict], int]:
+        """Lista todos os termos aditivos de todos os contratos, com dados do
+        contrato já embutidos — usado pela tela "Gestão de Termos Aditivos".
+        Inclui inativos (status_calc = 'Inativo') para dar visibilidade total."""
+        where_clauses = []
+        params: list = []
+        idx = 1
+
+        if filters:
+            if filters.get('nr_contrato'):
+                where_clauses.append(f"c.nr_contrato ILIKE ${idx}")
+                params.append(f"%{filters['nr_contrato']}%")
+                idx += 1
+            if filters.get('tipo'):
+                where_clauses.append(f"ta.tipo = ${idx}")
+                params.append(filters['tipo'])
+                idx += 1
+            status_calc = filters.get('status_calc')
+            if status_calc == 'Inativo':
+                where_clauses.append("ta.ativo = FALSE")
+            elif status_calc == 'Vencido':
+                where_clauses.append(
+                    "ta.ativo = TRUE AND ta.nova_data_fim IS NOT NULL AND ta.nova_data_fim < CURRENT_DATE"
+                )
+            elif status_calc == 'Ativo':
+                where_clauses.append(
+                    "ta.ativo = TRUE AND (ta.nova_data_fim IS NULL OR ta.nova_data_fim >= CURRENT_DATE)"
+                )
+
+        where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+        count_query = f"""
+            SELECT COUNT(*) FROM termo_aditivo ta
+            JOIN contrato c ON ta.contrato_id = c.id
+            {where_sql}
+        """
+        total = await self.conn.fetchval(count_query, *params)
+
+        data_query = f"""
+            SELECT
+                ta.id, ta.contrato_id, ta.numero_aditivo, ta.tipo, ta.objeto,
+                ta.data_assinatura, ta.data_publicacao, ta.data_inicio, ta.nova_data_fim,
+                ta.valor_acrescimo, ta.valor_supressao, ta.pae, ta.ativo,
+                ta.arquivo_id,
+                arq.nome_arquivo AS arquivo_nome,
+                c.nr_contrato, c.objeto AS contrato_objeto,
+                ct.nome AS contratado_nome,
+                CASE
+                    WHEN ta.ativo = FALSE THEN 'Inativo'
+                    WHEN ta.nova_data_fim IS NOT NULL AND ta.nova_data_fim < CURRENT_DATE THEN 'Vencido'
+                    ELSE 'Ativo'
+                END AS status_calc
+            FROM termo_aditivo ta
+            JOIN contrato c ON ta.contrato_id = c.id
+            LEFT JOIN contratado ct ON c.contratado_id = ct.id
+            LEFT JOIN arquivo arq ON ta.arquivo_id = arq.id
+            {where_sql}
+            ORDER BY ta.data_assinatura DESC, ta.numero_aditivo DESC
+            LIMIT ${idx} OFFSET ${idx + 1}
+        """
+        rows = await self.conn.fetch(data_query, *params, limit, offset)
+        return [dict(r) for r in rows], total if total else 0

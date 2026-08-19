@@ -244,7 +244,7 @@ def _build_order_by(sort_by: Optional[str], sort_order: Optional[str]) -> str:
         'contratado_nome': 'ct.nome',
         'data_fim': 'c.data_fim',
         'objeto': 'c.objeto',
-        'total_aditivos': '(SELECT COUNT(*) FROM termo_aditivo ta WHERE ta.contrato_id = c.id AND ta.ativo = TRUE)',
+        'total_aditivos': '(SELECT COUNT(*) FROM termo_aditivo ta WHERE ta.contrato_id = c.id)',
     }
     col = allowed.get(sort_by, 'c.data_fim') if sort_by else 'c.data_fim'
     direction = 'ASC' if sort_order and sort_order.lower() == 'asc' else 'DESC'

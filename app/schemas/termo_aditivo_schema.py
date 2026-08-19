@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, List
 from datetime import date
 
-TIPOS_ADITIVO = ["Prazo", "Valor", "Objeto", "Misto"]
+TIPOS_ADITIVO = ["Prazo", "Valor", "Objeto", "Misto", "Outros"]
 
 class TermoAditivoBase(BaseModel):
     tipo: str = Field(..., description="Tipo do aditivo: Prazo, Valor, Objeto ou Misto")

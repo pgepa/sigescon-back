@@ -215,7 +215,7 @@ class ContratoRepository:
                 s.nome as status_nome,
                 fiscal.nome as fiscal_nome,
                 gestor.nome as gestor_nome,
-                (SELECT COUNT(*) FROM termo_aditivo ta WHERE ta.contrato_id = c.id AND ta.ativo = TRUE) as total_aditivos
+                (SELECT COUNT(*) FROM termo_aditivo ta WHERE ta.contrato_id = c.id) as total_aditivos
             {base_query}
             LEFT JOIN usuario fiscal ON c.fiscal_id = fiscal.id
             LEFT JOIN usuario gestor ON c.gestor_id = gestor.id
