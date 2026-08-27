@@ -32,8 +32,8 @@ class TermoAditivoRepository:
                 data_assinatura, data_publicacao, data_inicio, nova_data_fim,
                 valor_acrescimo, valor_supressao, pae, observacoes, ativo, status
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE,
-                CASE WHEN $8 IS NOT NULL AND $8 < CURRENT_DATE THEN 'Vencido' ELSE 'Ativo' END
+                $1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, $12, TRUE,
+                CASE WHEN $8::date IS NOT NULL AND $8::date < CURRENT_DATE THEN 'Vencido' ELSE 'Ativo' END
             )
             RETURNING id
         """
