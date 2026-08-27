@@ -45,6 +45,7 @@ class ContratoBase(BaseModel):
 class Contrato(ContratoBase):
     id: int
     ativo: bool
+    data_fim_original: Optional[date] = None
     contratado_nome: Optional[str] = None
     modalidade_nome: Optional[str] = None
     status_nome: Optional[str] = None

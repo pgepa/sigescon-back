@@ -15,13 +15,13 @@ class ContratoRepository:
         # Usar campos específicos para evitar problemas de tipo
         query = """
             INSERT INTO contrato (
-                nr_contrato, objeto, data_inicio, data_fim, contratado_id,
+                nr_contrato, objeto, data_inicio, data_fim, data_fim_original, contratado_id,
                 modalidade_id, status_id, gestor_id, fiscal_id,
                 valor_anual, valor_global, base_legal, termos_contratuais,
                 fiscal_substituto_id, pae, doe, data_doe, garantia,
                 portaria_fiscal, nr_adesao_ata
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             RETURNING id
         """
 
@@ -31,6 +31,7 @@ class ContratoRepository:
             str(contrato.objeto),
             contrato.data_inicio,
             contrato.data_fim,
+            contrato.data_fim,  # data_fim_original — vigência de nascença do contrato, imutável
             int(contrato.contratado_id),
             int(contrato.modalidade_id),
             int(contrato.status_id),
@@ -244,6 +245,51 @@ class ContratoRepository:
                 print("Nenhum dado para atualizar - retornando contrato existente")
                 return await self.find_contrato_by_id(contrato_id)
 
+            # Se a Data Fim está sendo editada diretamente no formulário do
+            # contrato, o termo aditivo de Prazo/Misto ativo (se houver) é quem
+            # manda — a edição manual não pode contradizer o que o aditivo já
+            # formalizou. Se não houver aditivo de prazo ativo, a data digitada
+            # vale e passa a ser a nova "vigência de nascença" (data_fim_original).
+            if 'data_fim' in update_data:
+                aditivo_vigente = await self.conn.fetchrow(
+                    """
+                    SELECT nova_data_fim FROM termo_aditivo
+                    WHERE contrato_id = $1 AND ativo = TRUE AND tipo IN ('Prazo', 'Misto')
+                      AND nova_data_fim IS NOT NULL
+                    ORDER BY numero_aditivo DESC LIMIT 1
+                    """,
+                    contrato_id
+                )
+                if aditivo_vigente:
+                    update_data['data_fim'] = aditivo_vigente['nova_data_fim']
+                else:
+                    update_data['data_fim_original'] = update_data['data_fim']
+
+            # Se a Data Fim mudou (ou foi corrigida acima pelo aditivo) e quem
+            # editou não escolheu um status junto, recalcula Ativo/Encerrado
+            # automaticamente pela data final. Só troca entre esses dois — não
+            # mexe em Suspenso/Cancelado, que são decisão manual. Se o status já
+            # vier explícito no mesmo request, respeita a escolha de quem editou.
+            if 'data_fim' in update_data and 'status_id' not in update_data:
+                status_atual = await self.conn.fetchrow(
+                    """
+                    SELECT c.status_id AS id, s.nome AS nome
+                    FROM contrato c JOIN status s ON s.id = c.status_id
+                    WHERE c.id = $1
+                    """,
+                    contrato_id
+                )
+                if status_atual and status_atual['nome'] in ('Ativo', 'Encerrado'):
+                    novo_status_nome = await self.conn.fetchval(
+                        "SELECT CASE WHEN $1::date >= CURRENT_DATE THEN 'Ativo' ELSE 'Encerrado' END",
+                        update_data['data_fim']
+                    )
+                    if novo_status_nome != status_atual['nome']:
+                        novo_status_id = await self.conn.fetchval(
+                            "SELECT id FROM status WHERE nome = $1", novo_status_nome
+                        )
+                        update_data['status_id'] = novo_status_id
+
             # Construir UPDATE de forma simples
             set_clauses = []
             values = []
@@ -301,28 +347,113 @@ class ContratoRepository:
             raise
 
 
-    async def atualizar_vigencia_por_aditivo(self, contrato_id: int, nova_data_fim) -> None:
+    async def sincronizar_vigencia_contrato(self, contrato_id: int) -> None:
         """
-        Reflete no contrato a extensão de vigência de um termo aditivo de Prazo/Misto.
-        Só estende data_fim (nunca reduz, para não sobrescrever com um aditivo mais
-        antigo/menor por engano) e, se o contrato estava "Encerrado" e a nova data
-        ainda não venceu, reabre automaticamente para "Ativo". Não mexe em contratos
-        "Suspenso"/"Cancelado" — esses continuam sendo decisão manual.
+        Recalcula contrato.data_fim a partir do termo aditivo de Prazo/Misto ATIVO
+        de MAIOR NÚMERO (o mais recente) — não da maior data. Isso segue o princípio
+        de que o instrumento mais recente prevalece sobre os anteriores na mesma
+        matéria (lex posterior derogat priori): se o último aditivo de prazo reduziu
+        a vigência (correção, por exemplo), é essa data que vale, mesmo que um
+        aditivo anterior tivesse uma data maior.
+
+        Se não houver nenhum aditivo de Prazo/Misto ativo (nunca existiu, ou o
+        último foi inativado/excluído), volta para data_fim_original — a vigência
+        de nascença do contrato, gravada uma vez na criação e nunca mais alterada.
+
+        Recalcula também o status pela mesma regra da edição manual do contrato:
+        se a nova vigência já venceu, fecha para "Encerrado"; se ainda não venceu,
+        reabre para "Ativo". Só alterna entre esses dois — não mexe em
+        "Suspenso"/"Cancelado", que são decisão manual.
+
+        Chamar sempre que o conjunto de aditivos de Prazo/Misto ativos do contrato
+        puder ter mudado: criar, editar, inativar ou excluir um termo aditivo.
         """
         query = """
-            UPDATE contrato
+            WITH vigencia AS (
+                SELECT COALESCE(
+                    (SELECT nova_data_fim FROM termo_aditivo
+                     WHERE contrato_id = $1 AND ativo = TRUE AND tipo IN ('Prazo', 'Misto')
+                       AND nova_data_fim IS NOT NULL
+                     ORDER BY numero_aditivo DESC LIMIT 1),
+                    (SELECT data_fim_original FROM contrato WHERE id = $1)
+                ) AS data_fim_calculada
+            )
+            UPDATE contrato c
             SET
-                data_fim = $2,
+                data_fim = v.data_fim_calculada,
                 status_id = CASE
-                    WHEN status_id = (SELECT id FROM status WHERE nome = 'Encerrado')
-                         AND $2::date >= CURRENT_DATE
+                    WHEN c.status_id = (SELECT id FROM status WHERE nome = 'Encerrado')
+                         AND v.data_fim_calculada >= CURRENT_DATE
                     THEN (SELECT id FROM status WHERE nome = 'Ativo')
-                    ELSE status_id
+                    WHEN c.status_id = (SELECT id FROM status WHERE nome = 'Ativo')
+                         AND v.data_fim_calculada < CURRENT_DATE
+                    THEN (SELECT id FROM status WHERE nome = 'Encerrado')
+                    ELSE c.status_id
                 END,
                 updated_at = NOW()
-            WHERE id = $1 AND $2::date > data_fim
+            FROM vigencia v
+            WHERE c.id = $1
+              AND v.data_fim_calculada IS NOT NULL
+              AND v.data_fim_calculada IS DISTINCT FROM c.data_fim
         """
-        await self.conn.execute(query, contrato_id, nova_data_fim)
+        await self.conn.execute(query, contrato_id)
+
+    async def sincronizar_status_vencimento_geral(self) -> List[Dict]:
+        """
+        Varre TODOS os contratos ativos e recalcula tudo do zero, igual a
+        `sincronizar_vigencia_contrato` faz pra um contrato só, mas em lote:
+
+        1. data_fim = nova_data_fim do aditivo de Prazo/Misto ATIVO de maior
+           número (o mais recente), ou data_fim_original se não houver nenhum.
+        2. status = Encerrado se essa data já venceu, Ativo se não venceu —
+           só alterna entre esses dois, não mexe em Suspenso/Cancelado.
+
+        Não confia em contrato.data_fim como estando correto — recalcula a
+        partir da fonte (termo_aditivo) sempre. Isso cobre tanto o caso comum
+        (ninguém editou nada e a data só venceu com o tempo passando) quanto
+        qualquer desalinhamento entre data_fim e os aditivos que porventura
+        exista. Pensado para rodar via job agendado (00:01).
+        """
+        query = """
+            WITH vigencia_calculada AS (
+                SELECT
+                    c.id AS contrato_id,
+                    c.data_fim AS data_fim_atual,
+                    s.nome AS status_atual,
+                    COALESCE(
+                        (SELECT ta.nova_data_fim FROM termo_aditivo ta
+                         WHERE ta.contrato_id = c.id AND ta.ativo = TRUE
+                           AND ta.tipo IN ('Prazo', 'Misto') AND ta.nova_data_fim IS NOT NULL
+                         ORDER BY ta.numero_aditivo DESC LIMIT 1),
+                        c.data_fim_original
+                    ) AS data_fim_calculada
+                FROM contrato c
+                JOIN status s ON s.id = c.status_id
+                WHERE c.ativo = TRUE
+            )
+            UPDATE contrato c
+            SET
+                data_fim = v.data_fim_calculada,
+                status_id = CASE
+                    WHEN v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE
+                        THEN (SELECT id FROM status WHERE nome = 'Encerrado')
+                    WHEN v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE
+                        THEN (SELECT id FROM status WHERE nome = 'Ativo')
+                    ELSE c.status_id
+                END,
+                updated_at = NOW()
+            FROM vigencia_calculada v
+            WHERE c.id = v.contrato_id
+              AND v.data_fim_calculada IS NOT NULL
+              AND (
+                    v.data_fim_calculada IS DISTINCT FROM v.data_fim_atual
+                 OR (v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE)
+                 OR (v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE)
+              )
+            RETURNING c.id, c.nr_contrato
+        """
+        rows = await self.conn.fetch(query)
+        return [dict(r) for r in rows]
 
     async def delete_contrato(self, contrato_id: int) -> bool:
         """

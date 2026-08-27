@@ -63,6 +63,7 @@ class TermoAditivo(TermoAditivoBase):
     arquivo_id: Optional[int] = None
     arquivo_nome: Optional[str] = None
     ativo: bool
+    status: Optional[str] = Field(None, description="Status calculado do aditivo: Ativo, Vencido ou Inativo")
 
     model_config = ConfigDict(from_attributes=True)
 
