@@ -324,6 +324,10 @@ class ContratoRepository:
             
             if updated_id:
                 logger.info(f"Contrato {contrato_id} atualizado com sucesso")
+                # Revalida Ativo/Encerrado contra a data atual em toda edição,
+                # não só quando Data Fim foi o campo alterado — cobre o caso de
+                # o contrato já estar vencido e alguém editar outro campo dele.
+                await self.sincronizar_vigencia_contrato(contrato_id)
                 return await self.find_contrato_by_id(updated_id)
             else:
                 logger.warning(f"Contrato {contrato_id} não encontrado para atualização")
@@ -370,31 +374,39 @@ class ContratoRepository:
         """
         query = """
             WITH vigencia AS (
-                SELECT COALESCE(
-                    (SELECT nova_data_fim FROM termo_aditivo
-                     WHERE contrato_id = $1 AND ativo = TRUE AND tipo IN ('Prazo', 'Misto')
-                       AND nova_data_fim IS NOT NULL
-                     ORDER BY numero_aditivo DESC LIMIT 1),
-                    (SELECT data_fim_original FROM contrato WHERE id = $1)
-                ) AS data_fim_calculada
+                SELECT
+                    c.data_fim AS data_fim_atual,
+                    s.nome AS status_atual,
+                    COALESCE(
+                        (SELECT nova_data_fim FROM termo_aditivo
+                         WHERE contrato_id = $1 AND ativo = TRUE AND tipo IN ('Prazo', 'Misto')
+                           AND nova_data_fim IS NOT NULL
+                         ORDER BY numero_aditivo DESC LIMIT 1),
+                        c.data_fim_original
+                    ) AS data_fim_calculada
+                FROM contrato c
+                JOIN status s ON s.id = c.status_id
+                WHERE c.id = $1
             )
             UPDATE contrato c
             SET
                 data_fim = v.data_fim_calculada,
                 status_id = CASE
-                    WHEN c.status_id = (SELECT id FROM status WHERE nome = 'Encerrado')
-                         AND v.data_fim_calculada >= CURRENT_DATE
-                    THEN (SELECT id FROM status WHERE nome = 'Ativo')
-                    WHEN c.status_id = (SELECT id FROM status WHERE nome = 'Ativo')
-                         AND v.data_fim_calculada < CURRENT_DATE
-                    THEN (SELECT id FROM status WHERE nome = 'Encerrado')
+                    WHEN v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE
+                        THEN (SELECT id FROM status WHERE nome = 'Encerrado')
+                    WHEN v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE
+                        THEN (SELECT id FROM status WHERE nome = 'Ativo')
                     ELSE c.status_id
                 END,
                 updated_at = NOW()
             FROM vigencia v
             WHERE c.id = $1
               AND v.data_fim_calculada IS NOT NULL
-              AND v.data_fim_calculada IS DISTINCT FROM c.data_fim
+              AND (
+                    v.data_fim_calculada IS DISTINCT FROM v.data_fim_atual
+                 OR (v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE)
+                 OR (v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE)
+              )
         """
         await self.conn.execute(query, contrato_id)
 
