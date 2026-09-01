@@ -64,20 +64,16 @@ class RelatorioRepository:
         record = await self.conn.fetchrow(query, relatorio_id)
         return dict(record) if record else None
 
-    async def analise_relatorio(self, relatorio_id: int, data: Dict) -> Dict:
+    async def finalizar_relatorio(self, relatorio_id: int, status_id: int) -> Dict:
+        """Marca o relatório como Salvo (final) — sem aprovação de admin, é o
+        próprio fiscal que finaliza. `data_envio` registra o momento em que o
+        relatório deixou de ser Rascunho e passou a valer como entrega final."""
         query = """
             UPDATE relatoriofiscal
-            SET status_id = $1, aprovador_usuario_id = $2, observacoes_analise = $3, data_analise = NOW()
-            WHERE id = $4
-            RETURNING id
+            SET status_id = $1, data_envio = NOW()
+            WHERE id = $2
         """
-        await self.conn.execute(
-            query,
-            data['status_id'],
-            data['aprovador_usuario_id'],
-            data.get('observacoes_aprovador'),  # Keep API field name, but map to correct DB column
-            relatorio_id
-        )
+        await self.conn.execute(query, status_id, relatorio_id)
         return await self.get_relatorio_by_id(relatorio_id)
 
     async def get_relatorios_pendentes_analise(self, contrato_id: int) -> List[Dict]:

@@ -1,6 +1,6 @@
 from asyncpg import Connection
 from fastapi import HTTPException
-from app.schemas.relatorio_fiscalizacao_schema import RelatorioCreateSchema, RelatorioRevisarSchema
+from app.schemas.relatorio_fiscalizacao_schema import RelatorioCreateSchema, RelatorioSalvarSchema
 
 class RelatorioRepository:
     def __init__(self, db: Connection):
@@ -80,7 +80,8 @@ class RelatorioRepository:
 
     async def get_relatorios_para_gestor(self, contrato_id: int):
         """Retorna todos os relatórios do contrato, incluindo rascunhos, para acompanhamento do gestor/admin.
-        Inclui 'finalizado' para compatibilidade com registros anteriores à migração."""
+        Inclui os status antigos (enviado/aprovado/nao_conforme/finalizado) só para
+        não esconder relatórios anteriores à migração para o fluxo Rascunho/Salvo."""
         cols = await self._colunas_existem("updated_at", "gestor_observacao")
         extra = ""
         if cols["updated_at"]:
@@ -91,19 +92,20 @@ class RelatorioRepository:
             SELECT id, periodo_inicio, periodo_fim, data_relatorio, status, created_at{extra}
             FROM relatorio_fiscalizacao
             WHERE contrato_id = $1
-              AND status IN ('rascunho', 'enviado', 'aprovado', 'nao_conforme', 'finalizado')
+              AND status IN ('rascunho', 'salvo', 'enviado', 'aprovado', 'nao_conforme', 'finalizado')
             ORDER BY created_at DESC
         """
         return await self.db.fetch(query, contrato_id)
 
-    async def enviar_relatorio(self, relatorio_id: int):
-        """Fiscal envia o relatório ao gestor — muda status de rascunho para enviado."""
+    async def finalizar_relatorio(self, relatorio_id: int):
+        """Fiscal finaliza o próprio relatório — muda status de rascunho para salvo.
+        Sem aprovação de gestor: a partir daqui o relatório não é mais editável."""
         cols = await self._colunas_existem("updated_at")
         set_updated = ", updated_at = NOW()" if cols["updated_at"] else ""
         result = await self.db.fetchrow(
             f"""
             UPDATE relatorio_fiscalizacao
-               SET status = 'enviado'{set_updated}
+               SET status = 'salvo'{set_updated}
              WHERE id = $1 AND status = 'rascunho'
             RETURNING id, contrato_id
             """,
@@ -112,31 +114,7 @@ class RelatorioRepository:
         if not result:
             raise HTTPException(
                 status_code=404,
-                detail="Relatório não encontrado ou já foi enviado.",
-            )
-        return result
-
-    async def revisar_relatorio(self, relatorio_id: int, dados: RelatorioRevisarSchema):
-        """Gestor aprova ou retorna o relatório como não conforme."""
-        cols = await self._colunas_existem("updated_at", "gestor_observacao")
-        set_obs = ", gestor_observacao = $3" if cols["gestor_observacao"] else ""
-        set_updated = ", updated_at = NOW()" if cols["updated_at"] else ""
-        args = [relatorio_id, dados.status]
-        if cols["gestor_observacao"]:
-            args.append(dados.gestor_observacao)
-        result = await self.db.fetchval(
-            f"""
-            UPDATE relatorio_fiscalizacao
-               SET status = $2{set_obs}{set_updated}
-             WHERE id = $1 AND status = 'enviado'
-            RETURNING id
-            """,
-            *args,
-        )
-        if not result:
-            raise HTTPException(
-                status_code=404,
-                detail="Relatório não encontrado ou não está aguardando revisão.",
+                detail="Relatório não encontrado, ou não está em rascunho (já foi finalizado).",
             )
         return result
 
@@ -152,7 +130,18 @@ class RelatorioRepository:
             raise HTTPException(status_code=404, detail="Relatório não encontrado.")
         return resultado
 
-    async def atualizar_relatorio(self, relatorio_id: int, dados: RelatorioCreateSchema):
+    async def atualizar_relatorio(self, relatorio_id: int, dados: RelatorioSalvarSchema):
+        status_atual = await self.db.fetchval(
+            "SELECT status FROM relatorio_fiscalizacao WHERE id = $1", relatorio_id
+        )
+        if status_atual is None:
+            raise HTTPException(status_code=404, detail="Relatório não encontrado.")
+        if status_atual == "salvo":
+            raise HTTPException(
+                status_code=400,
+                detail="Este relatório já foi finalizado (Salvo) e não pode mais ser editado.",
+            )
+
         dados_dict = dados.model_dump(exclude_unset=True)
         if not dados_dict:
             return relatorio_id
@@ -163,11 +152,17 @@ class RelatorioRepository:
             raise HTTPException(status_code=404, detail="Relatório não encontrado.")
         return result
 
-    async def salvar_relatorio(self, contrato_id: int, dados: RelatorioCreateSchema):
+    async def salvar_relatorio(self, contrato_id: int, dados: RelatorioSalvarSchema):
         try:
-            # Pega os dados do formulário ignorando o que não foi preenchido
-            dados_dict = dados.model_dump(exclude_unset=True)
-            
+            # Criação: grava a linha inteira, inclusive perguntas ainda não
+            # respondidas (usando os defaults do schema — False/"" para as
+            # perguntas, None para as datas opcionais). NÃO usar exclude_unset
+            # aqui — colunas booleanas são NOT NULL no banco, e um rascunho
+            # parcial (fiscal salvou tendo respondido só as 3 primeiras
+            # perguntas) tem que preencher as demais com o default, não deixar
+            # a coluna de fora do INSERT.
+            dados_dict = dados.model_dump()
+
             # Monta o INSERT dinamicamente para todos os itens do formulário
             colunas = ["contrato_id"] + list(dados_dict.keys())
             valores = [contrato_id] + list(dados_dict.values())

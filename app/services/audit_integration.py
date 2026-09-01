@@ -252,83 +252,41 @@ async def audit_atualizar_configuracao(
         print(f"⚠️ Erro ao criar log de auditoria (atualizar config): {e}")
 
 
-async def audit_aprovar_relatorio(
+async def audit_finalizar_relatorio(
     conn: asyncpg.Connection,
     request: Optional[Request],
     usuario: Usuario,
     relatorio_id: int,
     pendencia_titulo: str,
     contrato_nr: str,
-    comentario: Optional[str] = None,
     perfil_usado: Optional[str] = None
 ):
-    """Registra log de aprovação de relatório"""
+    """Registra log de finalização de relatório (Rascunho -> Salvo, sem aprovação de admin)"""
     try:
         service = await get_audit_service(conn)
 
-        descricao = f"Aprovou o relatório da pendência '{pendencia_titulo}' do contrato #{contrato_nr}"
+        descricao = f"Finalizou o relatório da pendência '{pendencia_titulo}' do contrato #{contrato_nr}"
 
         if request:
             await service.criar_log_from_request(
                 request=request,
                 usuario=usuario,
-                acao=AcaoAuditoria.APROVAR,
+                acao=AcaoAuditoria.CONCLUIR,
                 entidade=EntidadeAuditoria.RELATORIO,
                 entidade_id=relatorio_id,
                 descricao=descricao,
-                dados_novos={"status": "Aprovado", "comentario": comentario} if comentario else {"status": "Aprovado"},
+                dados_novos={"status": "Salvo"},
                 perfil_usado=perfil_usado
             )
         else:
             await service.criar_log(
                 usuario=usuario,
-                acao=AcaoAuditoria.APROVAR,
+                acao=AcaoAuditoria.CONCLUIR,
                 entidade=EntidadeAuditoria.RELATORIO,
                 entidade_id=relatorio_id,
                 descricao=descricao,
-                dados_novos={"status": "Aprovado", "comentario": comentario} if comentario else {"status": "Aprovado"},
+                dados_novos={"status": "Salvo"},
                 perfil_usado=perfil_usado
             )
     except Exception as e:
-        print(f"⚠️ Erro ao criar log de auditoria (aprovar relatório): {e}")
-
-
-async def audit_rejeitar_relatorio(
-    conn: asyncpg.Connection,
-    request: Optional[Request],
-    usuario: Usuario,
-    relatorio_id: int,
-    pendencia_titulo: str,
-    contrato_nr: str,
-    comentario: str,
-    perfil_usado: Optional[str] = None
-):
-    """Registra log de rejeição de relatório"""
-    try:
-        service = await get_audit_service(conn)
-
-        descricao = f"Rejeitou o relatório da pendência '{pendencia_titulo}' do contrato #{contrato_nr}"
-
-        if request:
-            await service.criar_log_from_request(
-                request=request,
-                usuario=usuario,
-                acao=AcaoAuditoria.REJEITAR,
-                entidade=EntidadeAuditoria.RELATORIO,
-                entidade_id=relatorio_id,
-                descricao=descricao,
-                dados_novos={"status": "Rejeitado", "comentario": comentario},
-                perfil_usado=perfil_usado
-            )
-        else:
-            await service.criar_log(
-                usuario=usuario,
-                acao=AcaoAuditoria.REJEITAR,
-                entidade=EntidadeAuditoria.RELATORIO,
-                entidade_id=relatorio_id,
-                descricao=descricao,
-                dados_novos={"status": "Rejeitado", "comentario": comentario},
-                perfil_usado=perfil_usado
-            )
-    except Exception as e:
-        print(f"⚠️ Erro ao criar log de auditoria (rejeitar relatório): {e}")
+        print(f"⚠️ Erro ao criar log de auditoria (finalizar relatório): {e}")

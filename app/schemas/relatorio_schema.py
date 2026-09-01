@@ -25,8 +25,3 @@ class Relatorio(RelatorioBase):
     nome_arquivo: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
-
-class RelatorioAnalise(BaseModel):
-    aprovador_usuario_id: int
-    status_id: int
-    observacoes_aprovador: Optional[str] = None

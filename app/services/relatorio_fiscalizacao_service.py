@@ -2,11 +2,11 @@ import os
 import platform
 import shutil
 import subprocess
-from tempfile import NamedTemporaryFile
+from pathlib import Path
+from tempfile import NamedTemporaryFile, mkdtemp
 from docxtpl import DocxTemplate
 from app.repositories.relatorio_fiscalizacao_repo import RelatorioRepository
-from app.schemas.relatorio_fiscalizacao_schema import RelatorioCreateSchema, RelatorioRevisarSchema
-from app.services.email_service import EmailService
+from app.schemas.relatorio_fiscalizacao_schema import RelatorioCreateSchema
 
 
 def _get_soffice_path() -> str:
@@ -116,90 +116,40 @@ class RelatorioService:
 
         output_dir = os.path.dirname(tmp_docx_path)
         soffice = _get_soffice_path()
+
+        # Perfil de usuário isolado e descartável: sem ele, o LibreOffice usa o
+        # perfil padrão da máquina, que pode ter uma impressora configurada como
+        # padrão (ex.: uma impressora de rede desligada) — na conversão pra PDF
+        # ele tenta consultar essa impressora e trava com o diálogo nativo do
+        # Windows "Aguardando conexão de impressora...", até alguém cancelar.
+        # Um perfil novo a cada chamada evita essa dependência e também permite
+        # rodar conversões em paralelo sem duas instâncias disputarem o mesmo
+        # perfil (o LibreOffice trava o perfil enquanto está em uso).
+        profile_dir = mkdtemp(prefix="lo_profile_")
         try:
             subprocess.run(
-                [soffice, "--headless", "--convert-to", "pdf", tmp_docx_path, "--outdir", output_dir],
+                [
+                    soffice, "--headless", "--norestore",
+                    f"-env:UserInstallation={Path(profile_dir).as_uri()}",
+                    "--convert-to", "pdf", tmp_docx_path, "--outdir", output_dir,
+                ],
                 check=True,
                 capture_output=True,
+                timeout=60,
             )
         except subprocess.CalledProcessError as e:
             raise Exception(f"Erro na conversão do LibreOffice: {e.stderr.decode()}")
+        except subprocess.TimeoutExpired:
+            raise Exception("Conversão do LibreOffice demorou demais e foi cancelada (timeout de 60s).")
+        finally:
+            shutil.rmtree(profile_dir, ignore_errors=True)
 
         return tmp_docx_path.replace(".docx", ".pdf"), tmp_docx_path
 
-    async def enviar_para_gestor(self, relatorio_id: int):
-        """Fiscal envia o relatório. Notifica o gestor por email."""
-        result = await self.repo.enviar_relatorio(relatorio_id)
-        contrato_id = result["contrato_id"]
-
-        # Busca dados do contrato para montar o email
-        dados = await self.repo.db.fetchrow(
-            """
-            SELECT c.nr_contrato,
-                   fiscal.nome  AS fiscal_nome,
-                   gestor.email AS gestor_email,
-                   gestor.nome  AS gestor_nome
-              FROM contrato c
-              LEFT JOIN usuario fiscal ON c.fiscal_id = fiscal.id
-              LEFT JOIN usuario gestor ON c.gestor_id = gestor.id
-             WHERE c.id = $1
-            """,
-            contrato_id,
-        )
-
-        if dados and dados["gestor_email"]:
-            assunto = f"Novo Relatório de Fiscalização — Contrato {dados['nr_contrato']}"
-            corpo = (
-                f"Olá, {dados['gestor_nome'] or 'Gestor'},\n\n"
-                f"O fiscal {dados['fiscal_nome']} enviou um relatório de fiscalização "
-                f"do contrato {dados['nr_contrato']} para sua análise.\n\n"
-                f"Acesse o sistema para revisar.\n\n"
-                f"Sistema SIGESCON"
-            )
-            await EmailService.send_email(dados["gestor_email"], assunto, corpo)
-
-        return result
-
-    async def revisar_relatorio(self, relatorio_id: int, dados: RelatorioRevisarSchema):
-        """Gestor aprova ou retorna como não conforme. Notifica o fiscal por email."""
-        await self.repo.revisar_relatorio(relatorio_id, dados)
-
-        info = await self.repo.db.fetchrow(
-            """
-            SELECT c.nr_contrato,
-                   gestor.nome  AS gestor_nome,
-                   fiscal.email AS fiscal_email,
-                   fiscal.nome  AS fiscal_nome
-              FROM relatorio_fiscalizacao rf
-              JOIN contrato c ON rf.contrato_id = c.id
-              LEFT JOIN usuario gestor ON c.gestor_id = gestor.id
-              LEFT JOIN usuario fiscal ON c.fiscal_id = fiscal.id
-             WHERE rf.id = $1
-            """,
-            relatorio_id,
-        )
-
-        if info and info["fiscal_email"]:
-            if dados.status == "aprovado":
-                assunto = f"Relatório Aprovado — Contrato {info['nr_contrato']}"
-                corpo = (
-                    f"Olá, {info['fiscal_nome'] or 'Fiscal'},\n\n"
-                    f"O gestor {info['gestor_nome']} aprovou seu relatório de fiscalização "
-                    f"do contrato {info['nr_contrato']}.\n\n"
-                    f"A execução foi considerada conforme o contrato.\n\n"
-                    f"Sistema SIGESCON"
-                )
-            else:
-                corpo_obs = f"\n\nObservação do gestor:\n{dados.gestor_observacao}" if dados.gestor_observacao else ""
-                assunto = f"Relatório Retornado — Contrato {info['nr_contrato']}"
-                corpo = (
-                    f"Olá, {info['fiscal_nome'] or 'Fiscal'},\n\n"
-                    f"O gestor {info['gestor_nome']} identificou uma irregularidade no relatório "
-                    f"do contrato {info['nr_contrato']} e o retornou para correção.{corpo_obs}\n\n"
-                    f"Acesse o sistema para verificar e reenviar.\n\n"
-                    f"Sistema SIGESCON"
-                )
-            await EmailService.send_email(info["fiscal_email"], assunto, corpo)
+    async def finalizar_relatorio(self, relatorio_id: int):
+        """Fiscal finaliza o próprio relatório (Rascunho -> Salvo). Sem aprovação
+        de gestor — não há notificação de análise pendente pra ninguém."""
+        return await self.repo.finalizar_relatorio(relatorio_id)
 
     async def gerar_pdf(self, nr_contrato: str, dados_form: RelatorioCreateSchema):
         dados_banco = await self.repo.get_dados_contrato_completo(nr_contrato)

@@ -4,7 +4,7 @@ from asyncpg import Connection
 import os
 
 from app.core.database import get_connection
-from app.schemas.relatorio_fiscalizacao_schema import RelatorioCreateSchema, RelatorioSalvarSchema, RelatorioRevisarSchema
+from app.schemas.relatorio_fiscalizacao_schema import RelatorioCreateSchema, RelatorioSalvarSchema
 from app.repositories.relatorio_fiscalizacao_repo import RelatorioRepository
 from app.services.relatorio_fiscalizacao_service import RelatorioService
 
@@ -67,40 +67,34 @@ async def listar_relatorios_para_gestor(
         raise HTTPException(status_code=500, detail=f"Erro ao listar relatórios para o gestor: {str(e)}")
 
 
+@router.patch("/{relatorio_id}/finalizar")
+async def finalizar_relatorio(
+    relatorio_id: int,
+    db: Connection = Depends(get_connection),
+):
+    """Fiscal finaliza o próprio relatório (Rascunho -> Salvo). Sem aprovação de
+    gestor: a partir daqui o relatório deixa de ser editável."""
+    try:
+        repo = RelatorioRepository(db)
+        service = RelatorioService(repo)
+        result = await service.finalizar_relatorio(relatorio_id)
+        return {"id": result["id"], "status": "salvo", "mensagem": "Relatório finalizado com sucesso."}
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao finalizar relatório: {str(e)}")
+
+
 @router.post("/enviar/{relatorio_id}")
-async def enviar_relatorio(
+async def enviar_relatorio_compat(
     relatorio_id: int,
     db: Connection = Depends(get_connection),
 ):
-    """Fiscal envia o relatório ao gestor. Muda status de rascunho → enviado e notifica o gestor."""
-    try:
-        repo = RelatorioRepository(db)
-        service = RelatorioService(repo)
-        result = await service.enviar_para_gestor(relatorio_id)
-        return {"id": result["id"], "status": "enviado", "mensagem": "Relatório enviado ao gestor com sucesso."}
-    except HTTPException as http_exc:
-        raise http_exc
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao enviar relatório: {str(e)}")
-
-
-@router.patch("/{relatorio_id}/revisar")
-async def revisar_relatorio(
-    relatorio_id: int,
-    dados: RelatorioRevisarSchema,
-    db: Connection = Depends(get_connection),
-):
-    """Gestor revisa o relatório: aprova (conforme) ou retorna como não conforme."""
-    try:
-        repo = RelatorioRepository(db)
-        service = RelatorioService(repo)
-        await service.revisar_relatorio(relatorio_id, dados)
-        labels = {"aprovado": "Relatório aprovado.", "nao_conforme": "Irregularidade registrada. Fiscal notificado."}
-        return {"id": relatorio_id, "status": dados.status, "mensagem": labels[dados.status]}
-    except HTTPException as http_exc:
-        raise http_exc
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao revisar relatório: {str(e)}")
+    """Alias de compatibilidade da rota antiga (POST /enviar/{id}), que existia
+    quando havia aprovação do gestor. Mesma lógica de /finalizar — mantido só
+    até o frontend trocar para PATCH /{relatorio_id}/finalizar; remover depois
+    que o frontend estiver atualizado."""
+    return await finalizar_relatorio(relatorio_id, db)
 
 
 @router.get("/gerar-pdf-salvo/{relatorio_id}")
@@ -119,6 +113,32 @@ async def gerar_pdf_salvo(
             path=pdf_path,
             media_type="application/pdf",
             filename=f"Fiscalizacao_{relatorio_id}.pdf",
+        )
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar PDF: {str(e)}")
+
+
+@router.get("/visualizar/{relatorio_id}")
+async def visualizar_relatorio(
+    relatorio_id: int,
+    background_tasks: BackgroundTasks,
+    db: Connection = Depends(get_connection),
+):
+    """Mesmo PDF de /gerar-pdf-salvo, mas com Content-Disposition: inline —
+    o navegador abre no visualizador de PDF embutido em vez de forçar
+    download. Front-end: abrir essa URL em nova aba (target=_blank)."""
+    try:
+        repo = RelatorioRepository(db)
+        service = RelatorioService(repo)
+        pdf_path, docx_path = await service.gerar_pdf_por_id(relatorio_id)
+        background_tasks.add_task(cleanup_files, pdf_path, docx_path)
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            filename=f"Fiscalizacao_{relatorio_id}.pdf",
+            content_disposition_type="inline",
         )
     except HTTPException as http_exc:
         raise http_exc

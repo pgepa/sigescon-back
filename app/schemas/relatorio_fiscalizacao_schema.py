@@ -5,16 +5,11 @@ from typing import Optional, Literal
 
 
 # Status possíveis do relatório de fiscalização
-# rascunho   → fiscal está preenchendo, gestor não vê
-# enviado    → fiscal enviou, aguarda revisão do gestor
-# aprovado   → gestor aprovou (execução conforme contrato)
-# nao_conforme → gestor identificou irregularidade
-
-
-class RelatorioRevisarSchema(BaseModel):
-    """Usado pelo gestor para aprovar ou retornar o relatório."""
-    status: Literal["aprovado", "nao_conforme"]
-    gestor_observacao: Optional[str] = None
+# rascunho → fiscal está preenchendo, pode salvar e voltar quantas vezes quiser
+# salvo    → finalizado pelo próprio fiscal, não é mais editável
+#
+# Sem etapa de aprovação do gestor: os status antigos (enviado, aprovado,
+# nao_conforme) ficam só como histórico de relatórios anteriores a essa mudança.
 
 
 class RelatorioCreateSchema(BaseModel):

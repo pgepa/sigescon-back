@@ -7,7 +7,7 @@ from datetime import date
 from app.core.database import get_connection
 from app.schemas.usuario_schema import Usuario
 from app.api.dependencies import get_current_user
-from app.api.permissions import admin_required, PermissionChecker
+from app.api.permissions import PermissionChecker
 
 # Repositórios
 from app.repositories.relatorio_repo import RelatorioRepository
@@ -24,7 +24,7 @@ from app.services.relatorio_service import RelatorioService
 from app.services.file_service import FileService
 
 # Schemas
-from app.schemas.relatorio_schema import Relatorio, RelatorioCreate, RelatorioAnalise
+from app.schemas.relatorio_schema import Relatorio, RelatorioCreate
 
 router = APIRouter(
     prefix="/contratos/{contrato_id}/relatorios",
@@ -56,7 +56,9 @@ async def submit_relatorio(
     service: RelatorioService = Depends(get_relatorio_service),
     current_user: Usuario = Depends(get_current_user)
 ):
-    """Submete um novo relatório fiscal para um contrato, respondendo a uma pendência."""
+    """Salva o relatório fiscal como Rascunho, respondendo a uma pendência.
+    Pode ser chamado várias vezes para editar o rascunho (substitui o arquivo
+    e as observações) até ser finalizado em /finalizar."""
     relatorio_data = RelatorioCreate(
         observacoes_fiscal=observacoes_fiscal,
         pendencia_id=pendencia_id,
@@ -100,14 +102,15 @@ async def list_relatorios_without_slash(
     return await service.get_relatorios_by_contrato_id(contrato_id)
 
 
-@router.patch("/{relatorio_id}/analise", response_model=Relatorio)
-async def analisar_relatorio(
+@router.patch("/{relatorio_id}/finalizar", response_model=Relatorio)
+async def finalizar_relatorio(
     request: Request,
     contrato_id: int,
     relatorio_id: int,
-    analise_data: RelatorioAnalise,
     service: RelatorioService = Depends(get_relatorio_service),
-    admin_user: Usuario = Depends(admin_required)
+    current_user: Usuario = Depends(get_current_user)
 ):
-    """Aprova ou rejeita um relatório. Requer permissão de administrador."""
-    return await service.analisar_relatorio(relatorio_id, analise_data, admin_user, request)
+    """Finaliza o relatório (Rascunho -> Salvo) e conclui a pendência vinculada.
+    Sem aprovação de terceiros: só o fiscal titular do contrato (ou admin) pode
+    finalizar, e só um relatório em Rascunho pode ser finalizado."""
+    return await service.finalizar_relatorio(contrato_id, relatorio_id, current_user, request)
