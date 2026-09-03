@@ -9,6 +9,7 @@ from app.api.permissions import admin_required, require_admin_or_manager
 from app.schemas.usuario_schema import Usuario
 from app.schemas.termo_aditivo_schema import TermoAditivo, TermoAditivoCreate, TermoAditivoUpdate, TermoAditivoList
 from app.repositories.termo_aditivo_repo import TermoAditivoRepository
+from app.repositories.tipo_termo_aditivo_repo import TipoTermoAditivoRepository
 from app.repositories.contrato_repo import ContratoRepository
 from app.services.termo_aditivo_service import TermoAditivoService
 
@@ -21,11 +22,13 @@ router = APIRouter(
 def get_service(conn: asyncpg.Connection = Depends(get_connection)) -> TermoAditivoService:
     return TermoAditivoService(
         repo=TermoAditivoRepository(conn),
+        tipo_repo=TipoTermoAditivoRepository(conn),
         contrato_repo=ContratoRepository(conn),
     )
 
 
-@router.get("/", response_model=TermoAditivoList, summary="Listar termos aditivos do contrato")
+@router.get("", response_model=TermoAditivoList, summary="Listar termos aditivos do contrato")
+@router.get("/", response_model=TermoAditivoList, include_in_schema=False)
 async def listar_aditivos(
     contrato_id: int,
     service: TermoAditivoService = Depends(get_service),
@@ -36,7 +39,8 @@ async def listar_aditivos(
     return TermoAditivoList(data=itens, total=len(itens), contrato_id=contrato_id)
 
 
-@router.post("/", response_model=TermoAditivo, status_code=status.HTTP_201_CREATED, summary="Criar termo aditivo")
+@router.post("", response_model=TermoAditivo, status_code=status.HTTP_201_CREATED, summary="Criar termo aditivo")
+@router.post("/", response_model=TermoAditivo, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 async def criar_aditivo(
     contrato_id: int,
     dados: TermoAditivoCreate,

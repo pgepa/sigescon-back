@@ -21,6 +21,7 @@ from app.api.routers import (
 from app.api.routers import relatorio_fiscalizacao_router
 from app.api.routers import usuario_perfil_router
 from app.api.routers import termo_aditivo_router
+from app.api.routers import tipo_termo_aditivo_router
 from app.api.routers import aditivo_relatorio_router
 from app.api.routers import contrato_responsavel_router
 from app.api.routers import public_router
@@ -252,6 +253,9 @@ print(f"✅ Router de auditoria registrado: {API_PREFIX}/audit-logs")
 
 app.include_router(termo_aditivo_router.router, prefix=API_PREFIX)
 print(f"✅ Router de termos aditivos registrado: {API_PREFIX}/contratos/{{id}}/aditivos")
+
+app.include_router(tipo_termo_aditivo_router.router, prefix=API_PREFIX)
+print(f"✅ Router de tipos de termo aditivo registrado: {API_PREFIX}/tipos-termo-aditivo")
 
 app.include_router(aditivo_relatorio_router.router, prefix=API_PREFIX)
 print(f"✅ Router de relatório de termos aditivos registrado: {API_PREFIX}/aditivos/relatorio")

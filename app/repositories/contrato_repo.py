@@ -254,7 +254,7 @@ class ContratoRepository:
                 aditivo_vigente = await self.conn.fetchrow(
                     """
                     SELECT nova_data_fim FROM termo_aditivo
-                    WHERE contrato_id = $1 AND ativo = TRUE AND tipo IN ('Prazo', 'Misto')
+                    WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
                       AND nova_data_fim IS NOT NULL
                     ORDER BY numero_aditivo DESC LIMIT 1
                     """,
@@ -344,42 +344,23 @@ class ContratoRepository:
                 print(f"Query: {query}")
             if 'values' in locals():
                 print(f"Values: {values}")
-                print(f"Types: {[type(v).__name__ for v in values]}")
-            print(f"=== FIM ERRO ===\n")
-            
             logger.error(f"ERRO CRÍTICO - Contrato {contrato_id}: {e}")
             raise
-
 
     async def sincronizar_vigencia_contrato(self, contrato_id: int) -> None:
         """
         Recalcula contrato.data_fim a partir do termo aditivo de Prazo/Misto ATIVO
-        de MAIOR NÚMERO (o mais recente) — não da maior data. Isso segue o princípio
-        de que o instrumento mais recente prevalece sobre os anteriores na mesma
-        matéria (lex posterior derogat priori): se o último aditivo de prazo reduziu
-        a vigência (correção, por exemplo), é essa data que vale, mesmo que um
-        aditivo anterior tivesse uma data maior.
-
-        Se não houver nenhum aditivo de Prazo/Misto ativo (nunca existiu, ou o
-        último foi inativado/excluído), volta para data_fim_original — a vigência
-        de nascença do contrato, gravada uma vez na criação e nunca mais alterada.
-
-        Recalcula também o status pela mesma regra da edição manual do contrato:
-        se a nova vigência já venceu, fecha para "Encerrado"; se ainda não venceu,
-        reabre para "Ativo". Só alterna entre esses dois — não mexe em
-        "Suspenso"/"Cancelado", que são decisão manual.
-
-        Chamar sempre que o conjunto de aditivos de Prazo/Misto ativos do contrato
-        puder ter mudado: criar, editar, inativar ou excluir um termo aditivo.
+        de MAIOR NÚMERO (o mais recente) — não da maior data.
+        Também sincroniza o valor_global consolidando aditivos de Valor/Misto ativos.
         """
-        query = """
+        query_vigencia = """
             WITH vigencia AS (
                 SELECT
                     c.data_fim AS data_fim_atual,
                     s.nome AS status_atual,
                     COALESCE(
                         (SELECT nova_data_fim FROM termo_aditivo
-                         WHERE contrato_id = $1 AND ativo = TRUE AND tipo IN ('Prazo', 'Misto')
+                         WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
                            AND nova_data_fim IS NOT NULL
                          ORDER BY numero_aditivo DESC LIMIT 1),
                         c.data_fim_original
@@ -408,23 +389,32 @@ class ContratoRepository:
                  OR (v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE)
               )
         """
-        await self.conn.execute(query, contrato_id)
+        await self.conn.execute(query_vigencia, contrato_id)
+
+        # Sincroniza valor financeiro com aditivos de valor ativos
+        query_valor = """
+            WITH totais AS (
+                SELECT 
+                    COALESCE(SUM(valor_acrescimo), 0.0) AS soma_acrescimo,
+                    COALESCE(SUM(valor_supressao), 0.0) AS soma_supressao
+                FROM termo_aditivo
+                WHERE contrato_id = $1 AND ativo = TRUE AND status = 'Ativo' AND tipo_id IN (2, 3)
+            )
+            UPDATE contrato c
+            SET 
+                valor_global = COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao,
+                updated_at = NOW()
+            FROM totais t
+            WHERE c.id = $1 AND (t.soma_acrescimo > 0 OR t.soma_supressao > 0)
+        """
+        await self.conn.execute(query_valor, contrato_id)
 
     async def sincronizar_status_vencimento_geral(self) -> List[Dict]:
         """
-        Varre TODOS os contratos ativos e recalcula tudo do zero, igual a
-        `sincronizar_vigencia_contrato` faz pra um contrato só, mas em lote:
-
-        1. data_fim = nova_data_fim do aditivo de Prazo/Misto ATIVO de maior
-           número (o mais recente), ou data_fim_original se não houver nenhum.
-        2. status = Encerrado se essa data já venceu, Ativo se não venceu —
-           só alterna entre esses dois, não mexe em Suspenso/Cancelado.
-
-        Não confia em contrato.data_fim como estando correto — recalcula a
-        partir da fonte (termo_aditivo) sempre. Isso cobre tanto o caso comum
-        (ninguém editou nada e a data só venceu com o tempo passando) quanto
-        qualquer desalinhamento entre data_fim e os aditivos que porventura
-        exista. Pensado para rodar via job agendado (00:01).
+        Varre TODOS os contratos ativos e recalcula tudo do zero, em lote:
+        1. data_fim = nova_data_fim do aditivo de Prazo/Misto ATIVO de maior número (ou data_fim_original).
+        2. status = Encerrado se vencido, Ativo se não.
+        3. valor_global sincronizado com aditivos financeiros ativos.
         """
         query = """
             WITH vigencia_calculada AS (
@@ -435,7 +425,7 @@ class ContratoRepository:
                     COALESCE(
                         (SELECT ta.nova_data_fim FROM termo_aditivo ta
                          WHERE ta.contrato_id = c.id AND ta.ativo = TRUE
-                           AND ta.tipo IN ('Prazo', 'Misto') AND ta.nova_data_fim IS NOT NULL
+                           AND ta.tipo_id IN (1, 3) AND ta.nova_data_fim IS NOT NULL
                          ORDER BY ta.numero_aditivo DESC LIMIT 1),
                         c.data_fim_original
                     ) AS data_fim_calculada
@@ -465,6 +455,28 @@ class ContratoRepository:
             RETURNING c.id, c.nr_contrato
         """
         rows = await self.conn.fetch(query)
+
+        # Sincronização geral de valor financeiro
+        await self.conn.execute(
+            """
+            WITH totais_por_contrato AS (
+                SELECT 
+                    contrato_id,
+                    COALESCE(SUM(valor_acrescimo), 0.0) AS soma_acrescimo,
+                    COALESCE(SUM(valor_supressao), 0.0) AS soma_supressao
+                FROM termo_aditivo
+                WHERE ativo = TRUE AND status = 'Ativo' AND tipo_id IN (2, 3)
+                GROUP BY contrato_id
+            )
+            UPDATE contrato c
+            SET 
+                valor_global = COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao,
+                updated_at = NOW()
+            FROM totais_por_contrato t
+            WHERE c.id = t.contrato_id AND (t.soma_acrescimo > 0 OR t.soma_supressao > 0)
+            """
+        )
+
         return [dict(r) for r in rows]
 
     async def delete_contrato(self, contrato_id: int) -> bool:

@@ -1,7 +1,10 @@
 # app/repositories/termo_aditivo_repo.py
 import asyncpg
-from typing import List, Dict, Optional
+import logging
+from typing import List, Dict, Optional, Tuple
 from app.schemas.termo_aditivo_schema import TermoAditivoCreate, TermoAditivoUpdate
+
+logger = logging.getLogger(__name__)
 
 
 class TermoAditivoRepository:
@@ -25,21 +28,22 @@ class TermoAditivoRepository:
         )
 
     async def create(self, contrato_id: int, dados: TermoAditivoCreate) -> Dict:
-        numero = await self.get_proximo_numero(contrato_id)
+        numero = dados.numero_aditivo or await self.get_proximo_numero(contrato_id)
         query = """
             INSERT INTO termo_aditivo (
-                contrato_id, numero_aditivo, tipo, objeto,
+                contrato_id, numero_aditivo, tipo_id, objeto,
                 data_assinatura, data_publicacao, data_inicio, nova_data_fim,
-                valor_acrescimo, valor_supressao, pae, observacoes, ativo, status
+                valor_acrescimo, valor_supressao, pae, observacoes, ativo, status, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, $12, TRUE,
-                CASE WHEN $8::date IS NOT NULL AND $8::date < CURRENT_DATE THEN 'Vencido' ELSE 'Ativo' END
+                CASE WHEN $8::date IS NOT NULL AND $8::date < CURRENT_DATE THEN 'Vencido' ELSE 'Ativo' END,
+                NOW(), NOW()
             )
             RETURNING id
         """
         new_id = await self.conn.fetchval(
             query,
-            contrato_id, numero, dados.tipo, dados.objeto,
+            contrato_id, numero, dados.tipo_id, dados.objeto,
             dados.data_assinatura, dados.data_publicacao, dados.data_inicio, dados.nova_data_fim,
             dados.valor_acrescimo, dados.valor_supressao, dados.pae, dados.observacoes
         )
@@ -47,88 +51,131 @@ class TermoAditivoRepository:
         return await self.get_by_id(new_id)
 
     async def _recalcular_status_contrato(self, contrato_id: int) -> None:
-        """Recalcula o `status` (Ativo/Vencido/Inativo) de TODOS os termos aditivos
-        `ativo = TRUE` do contrato, aplicando as duas regras, nessa ordem de
-        prioridade:
+        """
+        Recalcula o `status` (Ativo/Vencido/Inativo) dos termos aditivos `ativo = TRUE` do contrato,
+        aplicando a REGRA DE INATIVAÇÃO SELETIVA POR NATUREZA:
 
-        1. Já venceu (nova_data_fim < hoje) -> 'Vencido', sempre, não importa
-           se foi ou não substituído por um aditivo mais novo depois.
-        2. Não é o de maior número entre os ainda ativos (foi substituído por um
-           aditivo mais recente, de qualquer tipo) -> 'Inativo'.
-        3. Nenhum dos dois -> 'Ativo' (é o instrumento vigente do contrato).
-
-        Importante: isso NUNCA toca a coluna `ativo` — só `status` (cosmético).
-        `ativo` continua servendo só pra soft-delete (Inativar/Excluir) e é o que
-        ContratoRepository.sincronizar_vigencia_contrato usa pra achar a data que
-        governa o contrato; um aditivo de Prazo/Misto superado apenas por um
-        aditivo de Valor/Outros mais novo continua `ativo = TRUE` e continua
-        sendo a fonte da vigência do contrato, mesmo aparecendo como 'Inativo'
-        na tela (só deixou de ser o "mais recente", não perdeu efeito legal)."""
+        1. 'Vencido': Se nova_data_fim < CURRENT_DATE.
+        2. 'Inativo' por sobreposição de mesma natureza:
+           - Termos que afetam PRAZO (tipo_id in 1, 3): inativados se houver termo posterior de Prazo/Misto ativo.
+           - Termos que afetam VALOR (tipo_id in 2, 3): inativados se houver termo posterior de Valor/Misto ativo.
+        3. 'Ativo':
+           - Termos de OUTROS (tipo_id = 4) NUNCA são inativados por outros aditivos (coexistem).
+           - Termos de naturezas distintas (ex: Prazo e Valor) coexistem ambos como 'Ativo'.
+        """
         await self.conn.execute(
             """
             WITH calculado AS (
-                SELECT id, numero_aditivo, nova_data_fim,
-                       MAX(numero_aditivo) OVER () AS max_numero_ativo
+                SELECT 
+                    id, 
+                    numero_aditivo, 
+                    tipo_id,
+                    nova_data_fim,
+                    MAX(numero_aditivo) FILTER (WHERE tipo_id IN (1, 3)) OVER () AS max_num_prazo,
+                    MAX(numero_aditivo) FILTER (WHERE tipo_id IN (2, 3)) OVER () AS max_num_valor
                 FROM termo_aditivo
                 WHERE contrato_id = $1 AND ativo = TRUE
+            ),
+            classificado AS (
+                SELECT id,
+                    CASE
+                        WHEN nova_data_fim IS NOT NULL AND nova_data_fim < CURRENT_DATE THEN 'Vencido'
+                        -- Se afeta Prazo e não é o mais recente de Prazo -> Inativo
+                        WHEN tipo_id = 1 AND max_num_prazo IS NOT NULL AND numero_aditivo < max_num_prazo THEN 'Inativo'
+                        -- Se afeta Valor e não é o mais recente de Valor -> Inativo
+                        WHEN tipo_id = 2 AND max_num_valor IS NOT NULL AND numero_aditivo < max_num_valor THEN 'Inativo'
+                        -- Se é Misto e foi superado em Prazo ou em Valor -> Inativo
+                        WHEN tipo_id = 3 AND (
+                            (max_num_prazo IS NOT NULL AND numero_aditivo < max_num_prazo) OR
+                            (max_num_valor IS NOT NULL AND numero_aditivo < max_num_valor)
+                        ) THEN 'Inativo'
+                        -- Outros (4) ou aditivo mais recente de sua respectiva natureza -> Ativo
+                        ELSE 'Ativo'
+                    END AS novo_status
+                FROM calculado
             )
             UPDATE termo_aditivo t
-            SET status = CASE
-                    WHEN c.nova_data_fim IS NOT NULL AND c.nova_data_fim < CURRENT_DATE THEN 'Vencido'
-                    WHEN c.numero_aditivo < c.max_numero_ativo THEN 'Inativo'
-                    ELSE 'Ativo'
-                END,
-                updated_at = NOW()
-            FROM calculado c
+            SET status = c.novo_status, updated_at = NOW()
+            FROM classificado c
             WHERE t.id = c.id
-              AND t.status IS DISTINCT FROM CASE
-                    WHEN c.nova_data_fim IS NOT NULL AND c.nova_data_fim < CURRENT_DATE THEN 'Vencido'
-                    WHEN c.numero_aditivo < c.max_numero_ativo THEN 'Inativo'
-                    ELSE 'Ativo'
-                END
+              AND t.status IS DISTINCT FROM c.novo_status
             """,
             contrato_id
         )
 
+    async def sincronizar_status_todos_aditivos(self) -> List[int]:
+        """
+        Rotina diária executada pelo Robô/Scheduler para todos os contratos ativos do sistema.
+        Aplica a regra de convivência e inativação seletiva por natureza.
+        """
+        rows = await self.conn.fetch(
+            """
+            WITH calculado AS (
+                SELECT 
+                    id, 
+                    contrato_id,
+                    numero_aditivo, 
+                    tipo_id,
+                    nova_data_fim,
+                    ativo,
+                    MAX(numero_aditivo) FILTER (WHERE ativo AND tipo_id IN (1, 3)) OVER (PARTITION BY contrato_id) AS max_num_prazo,
+                    MAX(numero_aditivo) FILTER (WHERE ativo AND tipo_id IN (2, 3)) OVER (PARTITION BY contrato_id) AS max_num_valor
+                FROM termo_aditivo
+            ),
+            status_final AS (
+                SELECT id,
+                    CASE
+                        WHEN ativo = FALSE THEN 'Inativo'
+                        WHEN nova_data_fim IS NOT NULL AND nova_data_fim < CURRENT_DATE THEN 'Vencido'
+                        WHEN tipo_id = 1 AND max_num_prazo IS NOT NULL AND numero_aditivo < max_num_prazo THEN 'Inativo'
+                        WHEN tipo_id = 2 AND max_num_valor IS NOT NULL AND numero_aditivo < max_num_valor THEN 'Inativo'
+                        WHEN tipo_id = 3 AND (
+                            (max_num_prazo IS NOT NULL AND numero_aditivo < max_num_prazo) OR
+                            (max_num_valor IS NOT NULL AND numero_aditivo < max_num_valor)
+                        ) THEN 'Inativo'
+                        ELSE 'Ativo'
+                    END AS status_calculado
+                FROM calculado
+            )
+            UPDATE termo_aditivo t
+            SET status = s.status_calculado, updated_at = NOW()
+            FROM status_final s
+            WHERE t.id = s.id AND t.status IS DISTINCT FROM s.status_calculado
+            RETURNING t.id
+            """
+        )
+        return [r["id"] for r in rows]
+
     async def get_by_id(self, aditivo_id: int) -> Optional[Dict]:
         query = """
-            SELECT ta.*
+            SELECT 
+                ta.*,
+                tta.nome AS tipo_nome,
+                tta.descricao AS tipo_descricao,
+                arq.nome_arquivo AS arquivo_nome
             FROM termo_aditivo ta
+            JOIN tipo_termo_aditivo tta ON ta.tipo_id = tta.id
+            LEFT JOIN arquivo arq ON ta.arquivo_id = arq.id
             WHERE ta.id = $1 AND ta.ativo = TRUE
         """
         row = await self.conn.fetchrow(query, aditivo_id)
-        if not row:
-            return None
-        result = dict(row)
-        result["arquivo_nome"] = None
-        if result.get("arquivo_id"):
-            arquivo = await self.conn.fetchrow(
-                "SELECT nome_arquivo FROM arquivo WHERE id = $1", result["arquivo_id"]
-            )
-            if arquivo:
-                result["arquivo_nome"] = arquivo["nome_arquivo"]
-        return result
+        return dict(row) if row else None
 
     async def get_by_contrato(self, contrato_id: int) -> List[Dict]:
         query = """
-            SELECT ta.*
+            SELECT 
+                ta.*,
+                tta.nome AS tipo_nome,
+                tta.descricao AS tipo_descricao,
+                arq.nome_arquivo AS arquivo_nome
             FROM termo_aditivo ta
+            JOIN tipo_termo_aditivo tta ON ta.tipo_id = tta.id
+            LEFT JOIN arquivo arq ON ta.arquivo_id = arq.id
             WHERE ta.contrato_id = $1
             ORDER BY ta.numero_aditivo ASC
         """
         rows = await self.conn.fetch(query, contrato_id)
-        results = []
-        for row in rows:
-            r = dict(row)
-            r["arquivo_nome"] = None
-            if r.get("arquivo_id"):
-                arquivo = await self.conn.fetchrow(
-                    "SELECT nome_arquivo FROM arquivo WHERE id = $1", r["arquivo_id"]
-                )
-                if arquivo:
-                    r["arquivo_nome"] = arquivo["nome_arquivo"]
-            results.append(r)
-        return results
+        return [dict(r) for r in rows]
 
     async def update(self, aditivo_id: int, dados: TermoAditivoUpdate) -> Optional[Dict]:
         fields = dados.model_dump(exclude_unset=True)
@@ -150,65 +197,20 @@ class TermoAditivoRepository:
         return await self.get_by_id(aditivo_id)
 
     async def delete(self, aditivo_id: int, contrato_id: int) -> bool:
-        """Exclusão lógica (inativar) — o registro continua existindo e visível na
-        listagem, só marcado como ativo = FALSE. Depois recalcula o status dos
-        demais aditivos do contrato: se este era o mais recente e "escondia"
-        outro aditivo como Inativo, esse outro volta a aparecer como Ativo/Vencido
-        (o inativado deixou de disputar a posição de mais recente)."""
+        """Exclusão lógica (inativar)"""
         result = await self.conn.execute(
             """
             UPDATE termo_aditivo
             SET ativo = FALSE, status = 'Inativo', updated_at = NOW()
-            WHERE id = $1 AND contrato_id = $2 AND ativo IS NOT FALSE
+            WHERE id = $1 AND contrato_id = $2
             """,
             aditivo_id, contrato_id
         )
         await self._recalcular_status_contrato(contrato_id)
         return result == "UPDATE 1"
 
-    async def sincronizar_status_todos_aditivos(self) -> List[int]:
-        """Recalcula o status (Ativo/Vencido/Inativo) de TODOS os termos aditivos de
-        TODOS os contratos, aplicando a mesma regra de `_recalcular_status_contrato`
-        (vencido tem prioridade sobre substituído; só o de maior número entre os
-        ativos de cada contrato fica 'Ativo') — usado pelo job noturno (00:02),
-        pra cobrir tanto um aditivo vencer só pela passagem do tempo quanto
-        qualquer desalinhamento que porventura exista."""
-        rows = await self.conn.fetch(
-            """
-            WITH calculado AS (
-                SELECT id, contrato_id, numero_aditivo, nova_data_fim, ativo,
-                       MAX(numero_aditivo) FILTER (WHERE ativo) OVER (PARTITION BY contrato_id) AS max_numero_ativo
-                FROM termo_aditivo
-            ),
-            status_final AS (
-                SELECT id,
-                    CASE
-                        WHEN ativo = FALSE THEN 'Inativo'
-                        WHEN nova_data_fim IS NOT NULL AND nova_data_fim < CURRENT_DATE THEN 'Vencido'
-                        WHEN max_numero_ativo IS NOT NULL AND numero_aditivo < max_numero_ativo THEN 'Inativo'
-                        ELSE 'Ativo'
-                    END AS status_calculado
-                FROM calculado
-            )
-            UPDATE termo_aditivo t
-            SET status = s.status_calculado, updated_at = NOW()
-            FROM status_final s
-            WHERE t.id = s.id AND t.status IS DISTINCT FROM s.status_calculado
-            RETURNING t.id
-            """
-        )
-        return [r["id"] for r in rows]
-
     async def hard_delete(self, aditivo_id: int, contrato_id: int) -> bool:
-        """Exclusão definitiva — remove o registro do banco (diferente de `delete`,
-        que só inativa). Funciona independente do estado atual de `ativo`, para
-        permitir excluir de vez um aditivo que já tinha sido inativado antes.
-
-        termo_aditivo e arquivo têm referência circular (termo_aditivo.arquivo_id
-        aponta pro arquivo, e arquivo.termo_aditivo_id aponta de volta) — por isso
-        primeiro zera termo_aditivo.arquivo_id, só depois consegue apagar o arquivo
-        e, por fim, o próprio termo_aditivo, sem violar nenhuma das duas FKs.
-        """
+        """Exclusão definitiva"""
         async with self.conn.transaction():
             await self.conn.execute(
                 "UPDATE termo_aditivo SET arquivo_id = NULL WHERE id = $1", aditivo_id
@@ -230,15 +232,45 @@ class TermoAditivoRepository:
         )
         return await self.get_by_id(aditivo_id)
 
+    async def get_aditivo_vigencia_recente(self, contrato_id: int) -> Optional[Dict]:
+        """Retorna o aditivo de vigência (Prazo ou Misto) mais recente ativo."""
+        query = """
+            SELECT * FROM termo_aditivo
+            WHERE contrato_id = $1 
+              AND tipo_id IN (1, 3) 
+              AND ativo = TRUE
+              AND status = 'Ativo'
+              AND nova_data_fim IS NOT NULL
+            ORDER BY numero_aditivo DESC
+            LIMIT 1
+        """
+        row = await self.conn.fetchrow(query, contrato_id)
+        return dict(row) if row else None
+
+    async def get_totais_valores_aditivos_ativos(self, contrato_id: int) -> Dict[str, float]:
+        """Calcula soma de acréscimos e supressões de aditivos de valor/misto ativos."""
+        query = """
+            SELECT 
+                COALESCE(SUM(valor_acrescimo), 0.0) as total_acrescimo,
+                COALESCE(SUM(valor_supressao), 0.0) as total_supressao
+            FROM termo_aditivo
+            WHERE contrato_id = $1 
+              AND tipo_id IN (2, 3) 
+              AND ativo = TRUE
+              AND status = 'Ativo'
+        """
+        row = await self.conn.fetchrow(query, contrato_id)
+        return {
+            'total_acrescimo': float(row['total_acrescimo']),
+            'total_supressao': float(row['total_supressao'])
+        }
+
     async def get_relatorio_aditivos(
         self,
         filters: Optional[Dict] = None,
         limit: int = 15,
-        offset: int = 0,
-    ) -> tuple[List[Dict], int]:
-        """Lista todos os termos aditivos de todos os contratos, com dados do
-        contrato já embutidos — usado pela tela "Gestão de Termos Aditivos".
-        Inclui inativos (status_calc = 'Inativo') para dar visibilidade total."""
+        offset: int = 0
+    ) -> Tuple[List[Dict], int]:
         where_clauses = []
         params: list = []
         idx = 1
@@ -248,9 +280,14 @@ class TermoAditivoRepository:
                 where_clauses.append(f"c.nr_contrato ILIKE ${idx}")
                 params.append(f"%{filters['nr_contrato']}%")
                 idx += 1
-            if filters.get('tipo'):
-                where_clauses.append(f"ta.tipo = ${idx}")
-                params.append(filters['tipo'])
+            if filters.get('tipo_id'):
+                where_clauses.append(f"ta.tipo_id = ${idx}")
+                params.append(filters['tipo_id'])
+                idx += 1
+            elif filters.get('tipo'):
+                # Compatibilidade com busca por nome de tipo
+                where_clauses.append(f"tta.nome ILIKE ${idx}")
+                params.append(f"%{filters['tipo']}%")
                 idx += 1
             status_calc = filters.get('status_calc')
             if status_calc in ('Ativo', 'Vencido', 'Inativo'):
@@ -263,13 +300,15 @@ class TermoAditivoRepository:
         count_query = f"""
             SELECT COUNT(*) FROM termo_aditivo ta
             JOIN contrato c ON ta.contrato_id = c.id
+            JOIN tipo_termo_aditivo tta ON ta.tipo_id = tta.id
             {where_sql}
         """
         total = await self.conn.fetchval(count_query, *params)
 
         data_query = f"""
             SELECT
-                ta.id, ta.contrato_id, ta.numero_aditivo, ta.tipo, ta.objeto,
+                ta.id, ta.contrato_id, ta.numero_aditivo, ta.tipo_id, ta.objeto,
+                tta.nome AS tipo_nome, tta.descricao AS tipo_descricao,
                 ta.data_assinatura, ta.data_publicacao, ta.data_inicio, ta.nova_data_fim,
                 ta.valor_acrescimo, ta.valor_supressao, ta.pae, ta.ativo,
                 ta.arquivo_id,
@@ -279,6 +318,7 @@ class TermoAditivoRepository:
                 ta.status AS status_calc
             FROM termo_aditivo ta
             JOIN contrato c ON ta.contrato_id = c.id
+            JOIN tipo_termo_aditivo tta ON ta.tipo_id = tta.id
             LEFT JOIN contratado ct ON c.contratado_id = ct.id
             LEFT JOIN arquivo arq ON ta.arquivo_id = arq.id
             {where_sql}
