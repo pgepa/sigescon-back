@@ -233,6 +233,10 @@ JWT_SECRET_KEY=sua_chave_secreta_muito_segura_aqui
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=720
 
+# CORS (opcional): origens do front, separadas por vírgula. Se omitido, permite qualquer origem
+# e habilita Private Network Access no Chrome quando o Starlette suportar (útil se a API está em IP privado).
+# CORS_ALLOW_ORIGINS=https://app.exemplo.gov.br,http://10.0.0.10:8080
+
 # Admin padrão (criado pelo seeder)
 ADMIN_EMAIL=admin@sigescon.com
 ADMIN_PASSWORD=Admin@123
@@ -427,7 +431,19 @@ Com o servidor rodando, acesse:
 #### Arquivos
 - `GET /api/v1/arquivos/{id}/download` - Download de arquivos com controle de acesso
 
+#### Termos Aditivos e Robô de Sincronização
+- `GET /api/v1/tipos-termo-aditivo` - Listar tipos de termo aditivo (1 - Prazo, 2 - Valor, 3 - Misto, 4 - Outros)
+- `GET /api/v1/contratos/{id}/aditivos` - Listar termos aditivos do contrato
+- `POST /api/v1/contratos/{id}/aditivos` - Criar termo aditivo com validação de tipo e inativação seletiva
+- `GET /api/v1/contratos/{id}/aditivos/{aditivo_id}` - Buscar termo aditivo por ID
+- `PATCH /api/v1/contratos/{id}/aditivos/{aditivo_id}` - Atualizar termo aditivo
+- `DELETE /api/v1/contratos/{id}/aditivos/{aditivo_id}` - Inativar termo aditivo (soft delete)
+- `DELETE /api/v1/contratos/{id}/aditivos/{aditivo_id}/permanente` - Excluir definitivamente (hard delete)
+- `POST /api/v1/contratos/{id}/aditivos/{aditivo_id}/arquivo` - Upload de arquivo vinculado ao aditivo
+- `GET /api/v1/aditivos/relatorio` - Relatório consolidado de termos aditivos de todos os contratos
+
 #### Tabelas Auxiliares
+- `GET /api/v1/tipos-termo-aditivo` - Listar tipos de termo aditivo (FK)
 - `GET /api/v1/perfis` - Listar perfis de usuário
 - `GET /api/v1/modalidades` - Listar modalidades de contratação
 - `GET /api/v1/status` - Listar status de contratos

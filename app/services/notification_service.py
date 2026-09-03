@@ -412,6 +412,44 @@ class NotificationScheduler:
         except Exception as e:
             logger.error(f"Erro ao verificar contratos e garantias próximos ao vencimento: {e}")
 
+    async def check_expired_contracts(self):
+        """Task para encerrar/reabrir contratos automaticamente conforme a
+        vigência (data_fim), executada diariamente à 00:01. Cobre o caso de um
+        contrato vencer com o tempo passando, sem ninguém editar o contrato ou
+        um termo aditivo dele (nesse caso a sincronização já roda na hora)."""
+        from app.core.database import get_connection
+        from app.repositories.contrato_repo import ContratoRepository
+
+        try:
+            async for conn in get_connection():
+                contrato_repo = ContratoRepository(conn)
+                alterados = await contrato_repo.sincronizar_status_vencimento_geral()
+                logger.info(
+                    f"Verificação de vigência de contratos concluída. "
+                    f"{len(alterados)} contrato(s) tiveram o status atualizado."
+                )
+        except Exception as e:
+            logger.error(f"Erro ao verificar vigência de contratos: {e}")
+
+    async def check_expired_termos_aditivos(self):
+        """Task para recalcular o status (Ativo/Vencido/Inativo) dos termos
+        aditivos, executada diariamente à 00:02 (logo após check_expired_contracts).
+        Cobre o caso de um aditivo vencer com o tempo passando, sem ninguém editar
+        ele (nesse caso a sincronização já roda na hora, em criar/editar/inativar)."""
+        from app.core.database import get_connection
+        from app.repositories.termo_aditivo_repo import TermoAditivoRepository
+
+        try:
+            async for conn in get_connection():
+                termo_aditivo_repo = TermoAditivoRepository(conn)
+                alterados = await termo_aditivo_repo.sincronizar_status_todos_aditivos()
+                logger.info(
+                    f"Verificação de status de termos aditivos concluída. "
+                    f"{len(alterados)} termo(s) aditivo(s) tiveram o status atualizado."
+                )
+        except Exception as e:
+            logger.error(f"Erro ao verificar status de termos aditivos: {e}")
+
     async def check_escalation(self):
         """Task para verificar escalonamento de pendências vencidas (executada diariamente às 9h)"""
         from app.core.database import get_connection
@@ -490,8 +528,28 @@ class NotificationScheduler:
             max_instances=1
         )
 
+        # Encerra/reabre contratos automaticamente conforme a vigência, todos os dias à 00:01
+        self.scheduler.add_job(
+            self.check_expired_contracts,
+            'cron',
+            hour=0,
+            minute=1,
+            id='check_expired_contracts',
+            max_instances=1
+        )
+
+        # Recalcula status (Ativo/Vencido/Inativo) dos termos aditivos, todos os dias à 00:02
+        self.scheduler.add_job(
+            self.check_expired_termos_aditivos,
+            'cron',
+            hour=0,
+            minute=2,
+            id='check_expired_termos_aditivos',
+            max_instances=1
+        )
+
         self.scheduler.start()
-        logger.info("Scheduler de notificações iniciado (alertas de contratos/garantias a cada 5 dias às 10h, escalonamento diário às 9h)")
+        logger.info("Scheduler de notificações iniciado (alertas de contratos/garantias a cada 5 dias às 10h, escalonamento diário às 9h, vigência de contratos diária às 00:01, status de termos aditivos diário às 00:02)")
     
     def stop_scheduler(self):
         """Para o agendador"""

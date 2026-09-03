@@ -10,7 +10,7 @@ MODALIDADES = [
     'Dispensa de Licitação', 'Inexigibilidade de Licitação', 'Credenciamento'
 ]
 STATUS_CONTRATO = ['Vigente', 'Encerrado', 'Rescindido', 'Suspenso', 'Aguardando Publicação']
-STATUS_RELATORIO = ['Pendente de Análise', 'Aprovado', 'Rejeitado com Pendência']
+STATUS_RELATORIO = ['Rascunho', 'Salvo', 'Pendente de Análise', 'Aprovado', 'Rejeitado com Pendência']
 STATUS_PENDENCIA = ['Pendente', 'Concluída', 'Cancelada']
 
 

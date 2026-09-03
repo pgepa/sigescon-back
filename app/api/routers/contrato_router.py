@@ -53,8 +53,8 @@ async def _create_contrato_logic(
     contratado_id: int,
     modalidade_id: int,
     status_id: int,
-    gestor_id: int,
-    fiscal_id: int,
+    gestor_id: Optional[int],
+    fiscal_id: Optional[int],
     valor_anual: Optional[float],
     valor_global: Optional[float],
     base_legal: Optional[str],
@@ -64,7 +64,11 @@ async def _create_contrato_logic(
     doe: Optional[str],
     data_doe: Optional[date],
     garantia: Optional[date],
+    portaria_fiscal: Optional[str],
+    nr_adesao_ata: Optional[str],
     documento_contrato: List[UploadFile],
+    documento_portaria: Optional[UploadFile],
+    documento_ata_registro: Optional[UploadFile],
     service: ContratoService,
     current_user: Usuario,
     request: Request
@@ -88,9 +92,15 @@ async def _create_contrato_logic(
         pae=pae,
         doe=doe,
         data_doe=data_doe,
-        garantia=garantia
+        garantia=garantia,
+        portaria_fiscal=portaria_fiscal,
+        nr_adesao_ata=nr_adesao_ata,
     )
-    return await service.create_contrato(contrato_create, documento_contrato, current_user, request)
+    return await service.create_contrato(
+        contrato_create, documento_contrato, current_user, request,
+        documento_portaria=documento_portaria,
+        documento_ata_registro=documento_ata_registro,
+    )
 
 # --- Endpoints ---
 
@@ -105,8 +115,8 @@ async def create_contrato_with_slash(
     contratado_id: int = Form(...),
     modalidade_id: int = Form(...),
     status_id: int = Form(...),
-    gestor_id: int = Form(...),
-    fiscal_id: int = Form(...),
+    gestor_id: Optional[int] = Form(None),
+    fiscal_id: Optional[int] = Form(None),
     valor_anual: Optional[float] = Form(None),
     valor_global: Optional[float] = Form(None),
     base_legal: Optional[str] = Form(None),
@@ -116,7 +126,11 @@ async def create_contrato_with_slash(
     doe: Optional[str] = Form(None),
     data_doe: Optional[date] = Form(None),
     garantia: Optional[date] = Form(None),
+    portaria_fiscal: Optional[str] = Form(None),
+    nr_adesao_ata: Optional[str] = Form(None),
     documento_contrato: List[UploadFile] = File(None),
+    documento_portaria: Optional[UploadFile] = File(None),
+    documento_ata_registro: Optional[UploadFile] = File(None),
     service: ContratoService = Depends(get_contrato_service),
     admin_user: Usuario = Depends(admin_required)
 ):
@@ -125,7 +139,9 @@ async def create_contrato_with_slash(
         nr_contrato, objeto, data_inicio, data_fim, contratado_id,
         modalidade_id, status_id, gestor_id, fiscal_id, valor_anual,
         valor_global, base_legal, termos_contratuais, fiscal_substituto_id,
-        pae, doe, data_doe, garantia, documento_contrato, service, admin_user, request
+        pae, doe, data_doe, garantia, portaria_fiscal, nr_adesao_ata,
+        documento_contrato, documento_portaria, documento_ata_registro,
+        service, admin_user, request
     )
 
 # Rota POST sem barra final
@@ -139,8 +155,8 @@ async def create_contrato(
     contratado_id: int = Form(...),
     modalidade_id: int = Form(...),
     status_id: int = Form(...),
-    gestor_id: int = Form(...),
-    fiscal_id: int = Form(...),
+    gestor_id: Optional[int] = Form(None),
+    fiscal_id: Optional[int] = Form(None),
     valor_anual: Optional[float] = Form(None),
     valor_global: Optional[float] = Form(None),
     base_legal: Optional[str] = Form(None),
@@ -150,7 +166,11 @@ async def create_contrato(
     doe: Optional[str] = Form(None),
     data_doe: Optional[date] = Form(None),
     garantia: Optional[date] = Form(None),
+    portaria_fiscal: Optional[str] = Form(None),
+    nr_adesao_ata: Optional[str] = Form(None),
     documento_contrato: List[UploadFile] = File(None),
+    documento_portaria: Optional[UploadFile] = File(None),
+    documento_ata_registro: Optional[UploadFile] = File(None),
     service: ContratoService = Depends(get_contrato_service),
     admin_user: Usuario = Depends(admin_required)
 ):
@@ -159,7 +179,9 @@ async def create_contrato(
         nr_contrato, objeto, data_inicio, data_fim, contratado_id,
         modalidade_id, status_id, gestor_id, fiscal_id, valor_anual,
         valor_global, base_legal, termos_contratuais, fiscal_substituto_id,
-        pae, doe, data_doe, garantia, documento_contrato, service, admin_user, request
+        pae, doe, data_doe, garantia, portaria_fiscal, nr_adesao_ata,
+        documento_contrato, documento_portaria, documento_ata_registro,
+        service, admin_user, request
     )
 
 
@@ -205,11 +227,35 @@ async def list_contratos_with_slash(
         tem_garantia, garantia_prazo_dias, service, current_user
     )
 
+def _build_contratos_filters(gestor_id, fiscal_id, objeto, nr_contrato, status_id, pae, ano,
+                              vencimento_dias, tem_garantia, garantia_prazo_dias, contratado_nome=None):
+    filters = {
+        'gestor_id': gestor_id, 'fiscal_id': fiscal_id, 'objeto': objeto,
+        'nr_contrato': nr_contrato, 'status_id': status_id, 'pae': pae, 'ano': ano,
+        'vencimento_dias': vencimento_dias, 'tem_garantia': tem_garantia,
+        'garantia_prazo_dias': garantia_prazo_dias, 'contratado_nome': contratado_nome
+    }
+    return {k: v for k, v in filters.items() if v is not None}
+
+
+def _build_order_by(sort_by: Optional[str], sort_order: Optional[str]) -> str:
+    allowed = {
+        'nr_contrato': 'c.nr_contrato',
+        'contratado_nome': 'ct.nome',
+        'data_fim': 'c.data_fim',
+        'objeto': 'c.objeto',
+        'total_aditivos': '(SELECT COUNT(*) FROM termo_aditivo ta WHERE ta.contrato_id = c.id)',
+    }
+    col = allowed.get(sort_by, 'c.data_fim') if sort_by else 'c.data_fim'
+    direction = 'ASC' if sort_order and sort_order.lower() == 'asc' else 'DESC'
+    return f"{col} {direction}"
+
+
 # Rota GET sem barra final
 @router.get("", response_model=ContratoPaginated)
 async def list_contratos(
-    page: int = Query(1, ge=1, description="Número da página"),
-    per_page: int = Query(10, ge=1, le=100, description="Itens por página"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=100),
     gestor_id: Optional[int] = Query(None),
     fiscal_id: Optional[int] = Query(None),
     objeto: Optional[str] = Query(None),
@@ -217,55 +263,30 @@ async def list_contratos(
     status_id: Optional[int] = Query(None),
     pae: Optional[str] = Query(None),
     ano: Optional[int] = Query(None),
-    vencimento_dias: Optional[str] = Query(None, description="Filtro por dias até vencimento (30,60,90)"),
-    tem_garantia: Optional[bool] = Query(None, description="Filtrar contratos que possuem garantia"),
-    garantia_prazo_dias: Optional[str] = Query(None, description="Filtro por prazo da garantia (30,60,90)"),
+    contratado_nome: Optional[str] = Query(None),
+    vencimento_dias: Optional[str] = Query(None),
+    tem_garantia: Optional[bool] = Query(None),
+    garantia_prazo_dias: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None, description="Campo para ordenação"),
+    sort_order: Optional[str] = Query(None, description="Direção: asc ou desc"),
     service: ContratoService = Depends(get_contrato_service),
     user_context: tuple = Depends(get_current_user_with_context)
 ):
     current_user, context = user_context
-    filters = {
-        'gestor_id': gestor_id,
-        'fiscal_id': fiscal_id,
-        'objeto': objeto,
-        'nr_contrato': nr_contrato,
-        'status_id': status_id,
-        'pae': pae,
-        'ano': ano,
-        'vencimento_dias': vencimento_dias,
-        'tem_garantia': tem_garantia,
-        'garantia_prazo_dias': garantia_prazo_dias
-    }
-    active_filters = {k: v for k, v in filters.items() if v is not None}
-
-    # Debug dos filtros recebidos
-    if vencimento_dias:
-        print(f"🔍 BACKEND: Filtro vencimento_dias recebido: {vencimento_dias}")
-    else:
-        print(f"🔍 BACKEND: Nenhum filtro de vencimento recebido")
-
-    if tem_garantia:
-        print(f"🛡️ BACKEND: Filtro tem_garantia recebido: {tem_garantia}")
-        if garantia_prazo_dias:
-            print(f"🛡️ BACKEND: Filtro garantia_prazo_dias recebido: {garantia_prazo_dias}")
-    else:
-        print(f"🛡️ BACKEND: Nenhum filtro de garantia recebido")
-
-    print(f"📡 BACKEND: Filtros ativos: {active_filters}")
-
-    # Criar contexto do usuário para isolamento de dados
-    user_ctx = {
-        'usuario_id': context.usuario_id,
-        'perfil_ativo_nome': context.perfil_ativo_nome
-    }
-
-    return await service.get_all_contratos(page=page, per_page=per_page, filters=active_filters, user_context=user_ctx)
+    active_filters = _build_contratos_filters(
+        gestor_id, fiscal_id, objeto, nr_contrato, status_id, pae, ano,
+        vencimento_dias, tem_garantia, garantia_prazo_dias, contratado_nome
+    )
+    order_by = _build_order_by(sort_by, sort_order)
+    user_ctx = {'usuario_id': context.usuario_id, 'perfil_ativo_nome': context.perfil_ativo_nome}
+    return await service.get_all_contratos(page=page, per_page=per_page, filters=active_filters,
+                                           user_context=user_ctx, order_by=order_by)
 
 # Rota sem barra final (para evitar redirects do frontend)
 @router.get("", response_model=ContratoPaginated)
 async def list_contratos_without_slash(
-    page: int = Query(1, ge=1, description="Número da página"),
-    per_page: int = Query(10, ge=1, le=100, description="Itens por página"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=100),
     gestor_id: Optional[int] = Query(None),
     fiscal_id: Optional[int] = Query(None),
     objeto: Optional[str] = Query(None),
@@ -273,49 +294,24 @@ async def list_contratos_without_slash(
     status_id: Optional[int] = Query(None),
     pae: Optional[str] = Query(None),
     ano: Optional[int] = Query(None),
-    vencimento_dias: Optional[str] = Query(None, description="Filtro por dias até vencimento (30,60,90)"),
-    tem_garantia: Optional[bool] = Query(None, description="Filtrar contratos que possuem garantia"),
-    garantia_prazo_dias: Optional[str] = Query(None, description="Filtro por prazo da garantia (30,60,90)"),
+    contratado_nome: Optional[str] = Query(None),
+    vencimento_dias: Optional[str] = Query(None),
+    tem_garantia: Optional[bool] = Query(None),
+    garantia_prazo_dias: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Optional[str] = Query(None),
     service: ContratoService = Depends(get_contrato_service),
     user_context: tuple = Depends(get_current_user_with_context)
 ):
     current_user, context = user_context
-    filters = {
-        'gestor_id': gestor_id,
-        'fiscal_id': fiscal_id,
-        'objeto': objeto,
-        'nr_contrato': nr_contrato,
-        'status_id': status_id,
-        'pae': pae,
-        'ano': ano,
-        'vencimento_dias': vencimento_dias,
-        'tem_garantia': tem_garantia,
-        'garantia_prazo_dias': garantia_prazo_dias
-    }
-    active_filters = {k: v for k, v in filters.items() if v is not None}
-
-    # Debug dos filtros recebidos
-    if vencimento_dias:
-        print(f"🔍 BACKEND: Filtro vencimento_dias recebido: {vencimento_dias}")
-    else:
-        print(f"🔍 BACKEND: Nenhum filtro de vencimento recebido")
-
-    if tem_garantia:
-        print(f"🛡️ BACKEND: Filtro tem_garantia recebido: {tem_garantia}")
-        if garantia_prazo_dias:
-            print(f"🛡️ BACKEND: Filtro garantia_prazo_dias recebido: {garantia_prazo_dias}")
-    else:
-        print(f"🛡️ BACKEND: Nenhum filtro de garantia recebido")
-
-    print(f"📡 BACKEND: Filtros ativos: {active_filters}")
-
-    # Criar contexto do usuário para isolamento de dados
-    user_ctx = {
-        'usuario_id': context.usuario_id,
-        'perfil_ativo_nome': context.perfil_ativo_nome
-    }
-
-    return await service.get_all_contratos(page=page, per_page=per_page, filters=active_filters, user_context=user_ctx)
+    active_filters = _build_contratos_filters(
+        gestor_id, fiscal_id, objeto, nr_contrato, status_id, pae, ano,
+        vencimento_dias, tem_garantia, garantia_prazo_dias, contratado_nome
+    )
+    order_by = _build_order_by(sort_by, sort_order)
+    user_ctx = {'usuario_id': context.usuario_id, 'perfil_ativo_nome': context.perfil_ativo_nome}
+    return await service.get_all_contratos(page=page, per_page=per_page, filters=active_filters,
+                                           user_context=user_ctx, order_by=order_by)
 
 @router.get("/{contrato_id}", response_model=Contrato)
 async def get_contrato_by_id(
@@ -360,49 +356,23 @@ async def update_contrato(
     doe: Optional[str] = Form(None),
     data_doe: Optional[date] = Form(None),
     garantia: Optional[date] = Form(None),
+    portaria_fiscal: Optional[str] = Form(None),
+    nr_adesao_ata: Optional[str] = Form(None),
     # Arquivos opcionais para upload
     documento_contrato: List[UploadFile] = File(None),
+    documento_portaria: Optional[UploadFile] = File(None),
+    documento_ata_registro: Optional[UploadFile] = File(None),
     service: ContratoService = Depends(get_contrato_service),
     admin_user: Usuario = Depends(admin_required)
 ):
     """
     Atualiza um contrato existente. Aceita dados de formulário e múltiplos ficheiros opcionais.
     Requer permissão de administrador.
-
-    - **contrato_id**: ID do contrato a ser atualizado
-    - **nr_contrato**: Número do contrato (pode ser alterado)
-    - **documento_contrato**: Arquivos opcionais para adicionar ao contrato
-    - **outros campos**: Campos opcionais do contrato para atualização
-
-    Limites de upload:
-    - Máximo 10 arquivos por upload
-    - 100MB por arquivo individual
-    - 250MB total
-
-    Todos os campos são opcionais - apenas os fornecidos serão atualizados.
-    **ATENÇÃO**: Alterar o número do contrato pode impactar relatórios e histórico.
     """
-    
-    # Debug detalhado dos dados recebidos
-    print(f"\n=== DEBUG ROUTER PATCH /contratos/{contrato_id} ===")
-    print(f"nr_contrato: {nr_contrato} (tipo: {type(nr_contrato).__name__})")
-    print(f"objeto: {objeto} (tipo: {type(objeto).__name__})")
-    print(f"data_inicio: {data_inicio} (tipo: {type(data_inicio).__name__})")
-    print(f"data_fim: {data_fim} (tipo: {type(data_fim).__name__})")
-    print(f"contratado_id: {contratado_id} (tipo: {type(contratado_id).__name__})")
-    print(f"modalidade_id: {modalidade_id} (tipo: {type(modalidade_id).__name__})")
-    print(f"status_id: {status_id} (tipo: {type(status_id).__name__})")
-    print(f"gestor_id: {gestor_id} (tipo: {type(gestor_id).__name__})")
-    print(f"fiscal_id: {fiscal_id} (tipo: {type(fiscal_id).__name__})")
-    print(f"valor_anual: {valor_anual} (tipo: {type(valor_anual).__name__})")
-    print(f"valor_global: {valor_global} (tipo: {type(valor_global).__name__})")
-    print(f"garantia: {garantia} (tipo: {type(garantia).__name__})")
-    print(f"documento_contrato: {len(documento_contrato) if documento_contrato else 0} arquivos")
-    
+
     # Constrói objeto ContratoUpdate apenas com campos fornecidos
     update_data = {}
-    
-    # Lista todos os campos que podem ser atualizados
+
     form_fields = {
         'nr_contrato': nr_contrato,
         'objeto': objeto,
@@ -421,33 +391,25 @@ async def update_contrato(
         'pae': pae,
         'doe': doe,
         'data_doe': data_doe,
-        'garantia': garantia
+        'garantia': garantia,
+        'portaria_fiscal': portaria_fiscal,
+        'nr_adesao_ata': nr_adesao_ata,
     }
-    
-    # Inclui apenas campos não None no update
+
     for field, value in form_fields.items():
         if value is not None:
             update_data[field] = value
-    
-    print(f"Dados para update: {update_data}")
-    print(f"Tipos dos dados: {[(k, type(v).__name__) for k, v in update_data.items()]}")
-    
-    # Cria o schema de update
-    try:
-        contrato_update = ContratoUpdate(**update_data)
-        print(f"ContratoUpdate criado com sucesso: {contrato_update}")
-    except Exception as e:
-        print(f"ERRO ao criar ContratoUpdate: {e}")
-        raise
-    print(f"=== FIM DEBUG ROUTER ===\n")
-    
-    # Chama o service passando o arquivo se fornecido
+
+    contrato_update = ContratoUpdate(**update_data)
+
     updated_contrato = await service.update_contrato(
         contrato_id=contrato_id,
         contrato_update=contrato_update,
         documento_contrato=documento_contrato,
         current_user=admin_user,
-        request=request
+        request=request,
+        documento_portaria=documento_portaria,
+        documento_ata_registro=documento_ata_registro,
     )
 
     if not updated_contrato:
@@ -517,7 +479,8 @@ async def download_arquivo_contrato(
 
     # Verificação de existência física do arquivo
     import os
-    path_completo = arquivo['path_armazenamento']
+    from app.services.file_service import FileService
+    path_completo = FileService.resolve_path(arquivo['path_armazenamento'])
     if not os.path.exists(path_completo):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -550,3 +513,35 @@ async def excluir_arquivo_contrato(
     """
     await service.delete_arquivo_contrato(contrato_id, arquivo_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- Endpoints dedicados para upload de arquivos por tipo ---
+
+@router.post(
+    "/{contrato_id}/arquivos/portaria",
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload de arquivo da Portaria de Designação",
+)
+async def upload_portaria(
+    contrato_id: int,
+    arquivo: UploadFile = File(...),
+    service: ContratoService = Depends(get_contrato_service),
+    admin_user: Usuario = Depends(admin_required),
+):
+    """Faz upload de um arquivo de portaria de designação do fiscal."""
+    return await service.upload_arquivo_tipado(contrato_id, arquivo, tipo_vinculo="portaria")
+
+
+@router.post(
+    "/{contrato_id}/arquivos/ata",
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload de arquivo da Ata de Registro de Preço",
+)
+async def upload_ata(
+    contrato_id: int,
+    arquivo: UploadFile = File(...),
+    service: ContratoService = Depends(get_contrato_service),
+    admin_user: Usuario = Depends(admin_required),
+):
+    """Faz upload de um arquivo da Ata de Registro de Preço."""
+    return await service.upload_arquivo_tipado(contrato_id, arquivo, tipo_vinculo="ata")

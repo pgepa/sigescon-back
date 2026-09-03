@@ -1,4 +1,5 @@
 # app/middleware/audit.py
+import os
 import time
 import json
 import logging
@@ -7,9 +8,14 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
+# Diretório de logs na raiz do projeto (evita falha ao iniciar se a pasta não existir)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_LOG_DIR = os.path.join(_PROJECT_ROOT, "logs")
+os.makedirs(_LOG_DIR, exist_ok=True)
+
 # Configurar logger específico para auditoria
 audit_logger = logging.getLogger("audit")
-audit_handler = logging.FileHandler("logs/audit.log")
+audit_handler = logging.FileHandler(os.path.join(_LOG_DIR, "audit.log"))
 audit_formatter = logging.Formatter(
     '%(asctime)s - %(levelname)s - %(message)s'
 )

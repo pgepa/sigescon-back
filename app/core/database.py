@@ -33,11 +33,13 @@ async def get_connection():
     """
     Obtém uma conexão do pool.
     """
+    from fastapi import HTTPException
     db_pool = await get_db_pool()
     try:
         async with db_pool.acquire() as connection:
             yield connection
-            # A conexão é automaticamente devolvida ao pool aqui
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Erro ao obter conexão do pool: {e}")
         raise

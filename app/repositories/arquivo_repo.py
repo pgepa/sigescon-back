@@ -12,15 +12,16 @@ class ArquivoRepository:
         path_armazenamento: str,
         tipo_arquivo: str,
         tamanho_bytes: int,
-        contrato_id: int
+        contrato_id: int,
+        tipo_vinculo: str = 'contrato'
     ) -> Dict:
         query = """
-            INSERT INTO arquivo (nome_arquivo, caminho_arquivo, tipo_mime, tamanho_bytes, contrato_id)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, nome_arquivo, caminho_arquivo as path_armazenamento, tipo_mime as tipo_arquivo, tamanho_bytes, contrato_id, ativo, created_at, updated_at
+            INSERT INTO arquivo (nome_arquivo, caminho_arquivo, tipo_mime, tamanho_bytes, contrato_id, tipo_vinculo)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, nome_arquivo, caminho_arquivo as path_armazenamento, tipo_mime as tipo_arquivo, tamanho_bytes, contrato_id, tipo_vinculo, ativo, created_at, updated_at
         """
         new_arquivo = await self.conn.fetchrow(
-            query, nome_arquivo, path_armazenamento, tipo_arquivo, tamanho_bytes, contrato_id
+            query, nome_arquivo, path_armazenamento, tipo_arquivo, tamanho_bytes, contrato_id, tipo_vinculo
         )
         return dict(new_arquivo)
     

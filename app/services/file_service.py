@@ -2,11 +2,13 @@
 import aiofiles
 import os
 import secrets
+from pathlib import Path
 from fastapi import UploadFile, HTTPException, status
 from typing import Tuple, List, Dict, Any
 
-# Define o diretório de uploads na raiz do projeto
-UPLOAD_DIRECTORY = "uploads"
+# Raiz do projeto e pasta de uploads
+PROJECT_ROOT = str(Path(__file__).parent.parent.parent)
+UPLOAD_DIRECTORY = os.path.join(PROJECT_ROOT, "uploads")
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'odt', 'ods'}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB por arquivo
 MAX_TOTAL_SIZE = 250 * 1024 * 1024  # 250MB total
@@ -82,7 +84,8 @@ class FileService:
                 await out_file.write(content)
 
             file_size = os.path.getsize(file_path)
-            return original_filename, file_path, file_size
+            relative_path = os.path.relpath(file_path, PROJECT_ROOT).replace("\\", "/")
+            return original_filename, relative_path, file_size
         except Exception as e:
             # Em caso de erro, remove o ficheiro parcialmente escrito se existir
             if os.path.exists(file_path):
@@ -162,25 +165,28 @@ class FileService:
 
         return saved_files
 
+    @staticmethod
+    def resolve_path(path: str) -> str:
+        """Resolve caminho relativo ou absoluto para caminho absoluto."""
+        if os.path.isabs(path):
+            return path
+        return os.path.join(PROJECT_ROOT, path)
+
     async def delete_file(self, file_path: str) -> bool:
         """
         Remove um arquivo físico do sistema de arquivos.
 
         Args:
-            file_path: Caminho completo para o arquivo
+            file_path: Caminho relativo ou absoluto para o arquivo
 
         Returns:
             bool: True se removido com sucesso, False caso contrário
         """
         try:
-            import os
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                return True
-            else:
-                # Arquivo já não existe, considera como "removido"
-                return True
+            absolute_path = self.resolve_path(file_path)
+            if os.path.exists(absolute_path):
+                os.remove(absolute_path)
+            return True
         except Exception as e:
-            # Log do erro mas não falha a operação
             print(f"Erro ao remover arquivo físico {file_path}: {e}")
             return False

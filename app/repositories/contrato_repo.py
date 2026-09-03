@@ -15,27 +15,28 @@ class ContratoRepository:
         # Usar campos específicos para evitar problemas de tipo
         query = """
             INSERT INTO contrato (
-                nr_contrato, objeto, data_inicio, data_fim, contratado_id,
+                nr_contrato, objeto, data_inicio, data_fim, data_fim_original, contratado_id,
                 modalidade_id, status_id, gestor_id, fiscal_id,
                 valor_anual, valor_global, base_legal, termos_contratuais,
-                fiscal_substituto_id, pae, doe, data_doe, garantia
+                fiscal_substituto_id, pae, doe, data_doe, garantia,
+                portaria_fiscal, nr_adesao_ata
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             RETURNING id
         """
 
-        # Converter tipos explicitamente para evitar erros de tipo
         new_contrato_id = await self.conn.fetchval(
             query,
-            str(contrato.nr_contrato),  # Garantir que é string
-            str(contrato.objeto),  # Garantir que é string
+            str(contrato.nr_contrato),
+            str(contrato.objeto),
             contrato.data_inicio,
             contrato.data_fim,
-            int(contrato.contratado_id),  # Garantir que é inteiro
-            int(contrato.modalidade_id),  # Garantir que é inteiro
-            int(contrato.status_id),  # Garantir que é inteiro
-            int(contrato.gestor_id),  # Garantir que é inteiro
-            int(contrato.fiscal_id),  # Garantir que é inteiro
+            contrato.data_fim,  # data_fim_original — vigência de nascença do contrato, imutável
+            int(contrato.contratado_id),
+            int(contrato.modalidade_id),
+            int(contrato.status_id),
+            int(contrato.gestor_id) if contrato.gestor_id is not None else None,
+            int(contrato.fiscal_id) if contrato.fiscal_id is not None else None,
             float(contrato.valor_anual) if contrato.valor_anual is not None else None,
             float(contrato.valor_global) if contrato.valor_global is not None else None,
             str(contrato.base_legal) if contrato.base_legal is not None else None,
@@ -44,7 +45,9 @@ class ContratoRepository:
             str(contrato.pae) if contrato.pae is not None else None,
             str(contrato.doe) if contrato.doe is not None else None,
             contrato.data_doe,
-            contrato.garantia
+            contrato.garantia,
+            str(contrato.portaria_fiscal) if contrato.portaria_fiscal is not None else None,
+            str(contrato.nr_adesao_ata) if contrato.nr_adesao_ata is not None else None,
         )
         return await self.find_contrato_by_id(new_contrato_id)
 
@@ -146,6 +149,27 @@ class ContratoRepository:
                     where_clauses.append(f"c.{key} ILIKE ${param_idx}")
                     params.append(f"%{value}%")
                     param_idx += 1
+                elif key == 'contratado_nome':
+                    where_clauses.append(f"ct.nome ILIKE ${param_idx}")
+                    params.append(f"%{value}%")
+                    param_idx += 1
+                elif key == 'search':
+                    # Busca livre: bate em número do contrato, objeto ou nome do contratado
+                    where_clauses.append(
+                        f"(c.nr_contrato ILIKE ${param_idx} OR c.objeto ILIKE ${param_idx} OR ct.nome ILIKE ${param_idx})"
+                    )
+                    params.append(f"%{value}%")
+                    param_idx += 1
+                elif key == 'data_inicio':
+                    # Contratos cuja vigência começa em ou após essa data
+                    where_clauses.append(f"c.data_inicio >= ${param_idx}")
+                    params.append(value)
+                    param_idx += 1
+                elif key == 'data_fim':
+                    # Contratos cuja vigência termina em ou antes dessa data
+                    where_clauses.append(f"c.data_fim <= ${param_idx}")
+                    params.append(value)
+                    param_idx += 1
                 elif key == 'vencimento_dias':
                     # Filtro por proximidade de vencimento (cumulativo - "ou menos")
                     # Considera apenas contratos com status "Ativo"
@@ -191,7 +215,8 @@ class ContratoRepository:
                 ct.nome as contratado_nome,
                 s.nome as status_nome,
                 fiscal.nome as fiscal_nome,
-                gestor.nome as gestor_nome
+                gestor.nome as gestor_nome,
+                (SELECT COUNT(*) FROM termo_aditivo ta WHERE ta.contrato_id = c.id) as total_aditivos
             {base_query}
             LEFT JOIN usuario fiscal ON c.fiscal_id = fiscal.id
             LEFT JOIN usuario gestor ON c.gestor_id = gestor.id
@@ -219,6 +244,51 @@ class ContratoRepository:
             if not update_data:
                 print("Nenhum dado para atualizar - retornando contrato existente")
                 return await self.find_contrato_by_id(contrato_id)
+
+            # Se a Data Fim está sendo editada diretamente no formulário do
+            # contrato, o termo aditivo de Prazo/Misto ativo (se houver) é quem
+            # manda — a edição manual não pode contradizer o que o aditivo já
+            # formalizou. Se não houver aditivo de prazo ativo, a data digitada
+            # vale e passa a ser a nova "vigência de nascença" (data_fim_original).
+            if 'data_fim' in update_data:
+                aditivo_vigente = await self.conn.fetchrow(
+                    """
+                    SELECT nova_data_fim FROM termo_aditivo
+                    WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
+                      AND nova_data_fim IS NOT NULL
+                    ORDER BY numero_aditivo DESC LIMIT 1
+                    """,
+                    contrato_id
+                )
+                if aditivo_vigente:
+                    update_data['data_fim'] = aditivo_vigente['nova_data_fim']
+                else:
+                    update_data['data_fim_original'] = update_data['data_fim']
+
+            # Se a Data Fim mudou (ou foi corrigida acima pelo aditivo) e quem
+            # editou não escolheu um status junto, recalcula Ativo/Encerrado
+            # automaticamente pela data final. Só troca entre esses dois — não
+            # mexe em Suspenso/Cancelado, que são decisão manual. Se o status já
+            # vier explícito no mesmo request, respeita a escolha de quem editou.
+            if 'data_fim' in update_data and 'status_id' not in update_data:
+                status_atual = await self.conn.fetchrow(
+                    """
+                    SELECT c.status_id AS id, s.nome AS nome
+                    FROM contrato c JOIN status s ON s.id = c.status_id
+                    WHERE c.id = $1
+                    """,
+                    contrato_id
+                )
+                if status_atual and status_atual['nome'] in ('Ativo', 'Encerrado'):
+                    novo_status_nome = await self.conn.fetchval(
+                        "SELECT CASE WHEN $1::date >= CURRENT_DATE THEN 'Ativo' ELSE 'Encerrado' END",
+                        update_data['data_fim']
+                    )
+                    if novo_status_nome != status_atual['nome']:
+                        novo_status_id = await self.conn.fetchval(
+                            "SELECT id FROM status WHERE nome = $1", novo_status_nome
+                        )
+                        update_data['status_id'] = novo_status_id
 
             # Construir UPDATE de forma simples
             set_clauses = []
@@ -254,6 +324,10 @@ class ContratoRepository:
             
             if updated_id:
                 logger.info(f"Contrato {contrato_id} atualizado com sucesso")
+                # Revalida Ativo/Encerrado contra a data atual em toda edição,
+                # não só quando Data Fim foi o campo alterado — cobre o caso de
+                # o contrato já estar vencido e alguém editar outro campo dele.
+                await self.sincronizar_vigencia_contrato(contrato_id)
                 return await self.find_contrato_by_id(updated_id)
             else:
                 logger.warning(f"Contrato {contrato_id} não encontrado para atualização")
@@ -270,12 +344,140 @@ class ContratoRepository:
                 print(f"Query: {query}")
             if 'values' in locals():
                 print(f"Values: {values}")
-                print(f"Types: {[type(v).__name__ for v in values]}")
-            print(f"=== FIM ERRO ===\n")
-            
             logger.error(f"ERRO CRÍTICO - Contrato {contrato_id}: {e}")
             raise
 
+    async def sincronizar_vigencia_contrato(self, contrato_id: int) -> None:
+        """
+        Recalcula contrato.data_fim a partir do termo aditivo de Prazo/Misto ATIVO
+        de MAIOR NÚMERO (o mais recente) — não da maior data.
+        Também sincroniza o valor_global consolidando aditivos de Valor/Misto ativos.
+        """
+        query_vigencia = """
+            WITH vigencia AS (
+                SELECT
+                    c.data_fim AS data_fim_atual,
+                    s.nome AS status_atual,
+                    COALESCE(
+                        (SELECT nova_data_fim FROM termo_aditivo
+                         WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
+                           AND nova_data_fim IS NOT NULL
+                         ORDER BY numero_aditivo DESC LIMIT 1),
+                        c.data_fim_original
+                    ) AS data_fim_calculada
+                FROM contrato c
+                JOIN status s ON s.id = c.status_id
+                WHERE c.id = $1
+            )
+            UPDATE contrato c
+            SET
+                data_fim = v.data_fim_calculada,
+                status_id = CASE
+                    WHEN v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE
+                        THEN (SELECT id FROM status WHERE nome = 'Encerrado')
+                    WHEN v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE
+                        THEN (SELECT id FROM status WHERE nome = 'Ativo')
+                    ELSE c.status_id
+                END,
+                updated_at = NOW()
+            FROM vigencia v
+            WHERE c.id = $1
+              AND v.data_fim_calculada IS NOT NULL
+              AND (
+                    v.data_fim_calculada IS DISTINCT FROM v.data_fim_atual
+                 OR (v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE)
+                 OR (v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE)
+              )
+        """
+        await self.conn.execute(query_vigencia, contrato_id)
+
+        # Sincroniza valor financeiro com aditivos de valor ativos
+        query_valor = """
+            WITH totais AS (
+                SELECT 
+                    COALESCE(SUM(valor_acrescimo), 0.0) AS soma_acrescimo,
+                    COALESCE(SUM(valor_supressao), 0.0) AS soma_supressao
+                FROM termo_aditivo
+                WHERE contrato_id = $1 AND ativo = TRUE AND status = 'Ativo' AND tipo_id IN (2, 3)
+            )
+            UPDATE contrato c
+            SET 
+                valor_global = COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao,
+                updated_at = NOW()
+            FROM totais t
+            WHERE c.id = $1 AND (t.soma_acrescimo > 0 OR t.soma_supressao > 0)
+        """
+        await self.conn.execute(query_valor, contrato_id)
+
+    async def sincronizar_status_vencimento_geral(self) -> List[Dict]:
+        """
+        Varre TODOS os contratos ativos e recalcula tudo do zero, em lote:
+        1. data_fim = nova_data_fim do aditivo de Prazo/Misto ATIVO de maior número (ou data_fim_original).
+        2. status = Encerrado se vencido, Ativo se não.
+        3. valor_global sincronizado com aditivos financeiros ativos.
+        """
+        query = """
+            WITH vigencia_calculada AS (
+                SELECT
+                    c.id AS contrato_id,
+                    c.data_fim AS data_fim_atual,
+                    s.nome AS status_atual,
+                    COALESCE(
+                        (SELECT ta.nova_data_fim FROM termo_aditivo ta
+                         WHERE ta.contrato_id = c.id AND ta.ativo = TRUE
+                           AND ta.tipo_id IN (1, 3) AND ta.nova_data_fim IS NOT NULL
+                         ORDER BY ta.numero_aditivo DESC LIMIT 1),
+                        c.data_fim_original
+                    ) AS data_fim_calculada
+                FROM contrato c
+                JOIN status s ON s.id = c.status_id
+                WHERE c.ativo = TRUE
+            )
+            UPDATE contrato c
+            SET
+                data_fim = v.data_fim_calculada,
+                status_id = CASE
+                    WHEN v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE
+                        THEN (SELECT id FROM status WHERE nome = 'Encerrado')
+                    WHEN v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE
+                        THEN (SELECT id FROM status WHERE nome = 'Ativo')
+                    ELSE c.status_id
+                END,
+                updated_at = NOW()
+            FROM vigencia_calculada v
+            WHERE c.id = v.contrato_id
+              AND v.data_fim_calculada IS NOT NULL
+              AND (
+                    v.data_fim_calculada IS DISTINCT FROM v.data_fim_atual
+                 OR (v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE)
+                 OR (v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE)
+              )
+            RETURNING c.id, c.nr_contrato
+        """
+        rows = await self.conn.fetch(query)
+
+        # Sincronização geral de valor financeiro
+        await self.conn.execute(
+            """
+            WITH totais_por_contrato AS (
+                SELECT 
+                    contrato_id,
+                    COALESCE(SUM(valor_acrescimo), 0.0) AS soma_acrescimo,
+                    COALESCE(SUM(valor_supressao), 0.0) AS soma_supressao
+                FROM termo_aditivo
+                WHERE ativo = TRUE AND status = 'Ativo' AND tipo_id IN (2, 3)
+                GROUP BY contrato_id
+            )
+            UPDATE contrato c
+            SET 
+                valor_global = COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao,
+                updated_at = NOW()
+            FROM totais_por_contrato t
+            WHERE c.id = t.contrato_id AND (t.soma_acrescimo > 0 OR t.soma_supressao > 0)
+            """
+        )
+
+        return [dict(r) for r in rows]
 
     async def delete_contrato(self, contrato_id: int) -> bool:
         """
@@ -316,24 +518,30 @@ class ContratoRepository:
 
     # Métodos para gerenciamento de arquivos do contrato
     async def get_arquivos_contrato(self, contrato_id: int) -> List[Dict]:
-        """Busca todos os arquivos de um contrato específico"""
+        """Busca todos os arquivos vinculados ao contrato (contrato, portaria, termo_aditivo)"""
         query = """
             SELECT
-                id,
-                nome_arquivo,
-                tipo_mime as tipo_arquivo,
-                tamanho_bytes,
-                contrato_id,
-                created_at::text as created_at
-            FROM arquivo
-            WHERE contrato_id = $1
-            ORDER BY created_at DESC
+                a.id,
+                a.nome_arquivo,
+                a.tipo_mime as tipo_arquivo,
+                a.tamanho_bytes,
+                a.contrato_id,
+                a.tipo_vinculo,
+                a.created_at::text as created_at,
+                a.termo_aditivo_id,
+                ta.numero_aditivo as termo_aditivo_numero
+            FROM arquivo a
+            LEFT JOIN termo_aditivo ta ON a.termo_aditivo_id = ta.id AND ta.ativo = TRUE
+            WHERE a.contrato_id = $1
+              AND a.tipo_vinculo IN ('contrato', 'portaria', 'ata', 'termo_aditivo')
+              AND a.ativo = TRUE
+            ORDER BY a.tipo_vinculo, a.created_at DESC
         """
         rows = await self.conn.fetch(query, contrato_id)
         return [dict(row) for row in rows]
 
     async def get_arquivo_by_id(self, arquivo_id: int, contrato_id: int) -> Optional[Dict]:
-        """Busca um arquivo específico de um contrato"""
+        """Busca um arquivo específico pelo id e contrato (qualquer tipo_vinculo)"""
         query = """
             SELECT
                 id,
@@ -342,9 +550,10 @@ class ContratoRepository:
                 tipo_mime as tipo_arquivo,
                 tamanho_bytes,
                 contrato_id,
+                tipo_vinculo,
                 created_at::text as created_at
             FROM arquivo
-            WHERE id = $1 AND contrato_id = $2
+            WHERE id = $1 AND contrato_id = $2 AND ativo = TRUE
         """
         row = await self.conn.fetchrow(query, arquivo_id, contrato_id)
         return dict(row) if row else None

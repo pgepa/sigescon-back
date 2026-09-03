@@ -133,12 +133,30 @@ class ContratoService:
                 )
                 await EmailService.send_email(old_fiscal['email'], subject, body, is_html=True)
 
+    async def _save_typed_file(self, contrato_id: int, file: UploadFile, tipo_vinculo: str) -> None:
+        """Salva um arquivo com tipo_vinculo específico (portaria, ata, etc.)"""
+        if not file or not file.filename or not file.filename.strip():
+            return
+        nome_original, file_path, file_size = await self.file_service.save_upload_file(
+            contrato_id, file
+        )
+        await self.arquivo_repo.create_arquivo(
+            nome_arquivo=nome_original,
+            path_armazenamento=file_path,
+            tipo_arquivo=file.content_type,
+            tamanho_bytes=file_size,
+            contrato_id=contrato_id,
+            tipo_vinculo=tipo_vinculo,
+        )
+
     async def create_contrato(
         self,
         contrato_create: ContratoCreate,
         files: Optional[List[UploadFile]] = None,
         current_user: Optional[Usuario] = None,
-        request: Optional[Request] = None
+        request: Optional[Request] = None,
+        documento_portaria: Optional[UploadFile] = None,
+        documento_ata_registro: Optional[UploadFile] = None,
     ) -> Contrato:
         """Cria um novo contrato e, opcionalmente, anexa múltiplos arquivos"""
 
@@ -159,7 +177,7 @@ class ContratoService:
         new_contrato_data = await self.contrato_repo.create_contrato(contrato_create)
         contrato_id = new_contrato_data['id']
 
-        # Processamento de arquivos
+        # Processamento de arquivos do contrato
         if files and any(file.filename for file in files if file):
             # Filtra apenas arquivos válidos
             valid_files = [file for file in files if file and file.filename and file.filename.strip()]
@@ -178,6 +196,19 @@ class ContratoService:
                     )
                     # Vincula o ID do arquivo ao contrato
                     await self.arquivo_repo.link_arquivo_to_contrato(arquivo_data['id'], contrato_id)
+
+        # Processamento dos arquivos de portaria e ata
+        if documento_portaria:
+            try:
+                await self._save_typed_file(contrato_id, documento_portaria, 'portaria')
+            except Exception as e:
+                logger.warning(f"Erro ao salvar arquivo da portaria para contrato {contrato_id}: {e}")
+
+        if documento_ata_registro:
+            try:
+                await self._save_typed_file(contrato_id, documento_ata_registro, 'ata')
+            except Exception as e:
+                logger.warning(f"Erro ao salvar arquivo da ata para contrato {contrato_id}: {e}")
 
         # Retorna o contrato completo com JOINs
         contrato_response = Contrato.model_validate(new_contrato_data)
@@ -225,13 +256,14 @@ class ContratoService:
             return Contrato.model_validate(contrato_data)
         return None
 
-    async def get_all_contratos(self, page: int, per_page: int, filters: Optional[Dict] = None, user_context: Optional[Dict] = None) -> ContratoPaginated:
+    async def get_all_contratos(self, page: int, per_page: int, filters: Optional[Dict] = None, user_context: Optional[Dict] = None, order_by: str = 'c.data_fim DESC') -> ContratoPaginated:
         offset = (page - 1) * per_page
         contratos_data, total_items = await self.contrato_repo.get_all_contratos(
             filters=filters,
             limit=per_page,
             offset=offset,
-            user_context=user_context
+            user_context=user_context,
+            order_by=order_by
         )
         total_pages = math.ceil(total_items / per_page) if total_items > 0 else 1
         return ContratoPaginated(
@@ -248,7 +280,9 @@ class ContratoService:
         contrato_update: ContratoUpdate,
         documento_contrato: Optional[List[UploadFile]] = None,
         current_user: Optional[Usuario] = None,
-        request: Optional[Request] = None
+        request: Optional[Request] = None,
+        documento_portaria: Optional[UploadFile] = None,
+        documento_ata_registro: Optional[UploadFile] = None,
     ) -> Optional[Contrato]:
         """
         Atualiza um contrato existente, incluindo upload de múltiplos arquivos opcionais.
@@ -318,6 +352,19 @@ class ContratoService:
             else:
                 print("Nenhum arquivo para processar")
             print(f"=== FIM DEBUG - Processamento de arquivos ===\n")
+
+            # Processamento dos arquivos de portaria e ata
+            if documento_portaria:
+                try:
+                    await self._save_typed_file(contrato_id, documento_portaria, 'portaria')
+                except Exception as e:
+                    logger.warning(f"Erro ao salvar arquivo da portaria para contrato {contrato_id}: {e}")
+
+            if documento_ata_registro:
+                try:
+                    await self._save_typed_file(contrato_id, documento_ata_registro, 'ata')
+                except Exception as e:
+                    logger.warning(f"Erro ao salvar arquivo da ata para contrato {contrato_id}: {e}")
 
             # Executa a atualização no banco (método correto)
             print(f"\n=== DEBUG - Chamando repositório update_contrato ===")
@@ -478,3 +525,33 @@ class ContratoService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Erro interno ao deletar arquivo: {str(e)}"
             )
+
+    async def upload_arquivo_tipado(
+        self, contrato_id: int, file: UploadFile, tipo_vinculo: str
+    ) -> Dict:
+        """Upload de arquivo com tipo_vinculo específico (portaria, ata, etc.)"""
+        contrato = await self.contrato_repo.find_contrato_by_id(contrato_id)
+        if not contrato:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Contrato não encontrado"
+            )
+
+        if not file or not file.filename or not file.filename.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Arquivo não fornecido"
+            )
+
+        nome_original, file_path, file_size = await self.file_service.save_upload_file(
+            contrato_id, file
+        )
+        arquivo_data = await self.arquivo_repo.create_arquivo(
+            nome_arquivo=nome_original,
+            path_armazenamento=file_path,
+            tipo_arquivo=file.content_type,
+            tamanho_bytes=file_size,
+            contrato_id=contrato_id,
+            tipo_vinculo=tipo_vinculo,
+        )
+        return arquivo_data
