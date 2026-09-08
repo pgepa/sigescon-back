@@ -47,6 +47,18 @@ class TermoAditivoService:
         await self._verificar_contrato(contrato_id)
         await self._validar_tipo(dados.tipo_id)
 
+        # Validações de campos obrigatórios gerais
+        if not dados.data_assinatura:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data de assinatura é obrigatória.")
+        if not dados.data_inicio:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data de início é obrigatória.")
+        if not dados.pae or not dados.pae.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Número do PAE é obrigatório.")
+        if not dados.data_publicacao:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data de publicação é obrigatória.")
+        if not dados.objeto or not dados.objeto.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Descrição do termo aditivo é obrigatória.")
+
         # Validações por natureza
         if dados.tipo_id in [1, 3] and not dados.nova_data_fim:
             raise HTTPException(
@@ -58,6 +70,17 @@ class TermoAditivoService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Termos aditivos de Valor ou Misto exigem a definição de 'valor_acrescimo' ou 'valor_supressao'."
             )
+
+        # Limpeza defensiva por natureza
+        if dados.tipo_id == 1:
+            dados.valor_acrescimo = None
+            dados.valor_supressao = None
+        elif dados.tipo_id == 2:
+            dados.nova_data_fim = None
+        elif dados.tipo_id == 4:
+            dados.nova_data_fim = None
+            dados.valor_acrescimo = None
+            dados.valor_supressao = None
 
         novo = await self.repo.create(contrato_id, dados)
         await self.contrato_repo.sincronizar_vigencia_contrato(contrato_id)
@@ -79,6 +102,15 @@ class TermoAditivoService:
         await self.buscar_por_id(contrato_id, aditivo_id)
         if dados.tipo_id is not None:
             await self._validar_tipo(dados.tipo_id)
+            if dados.tipo_id == 1:
+                dados.valor_acrescimo = None
+                dados.valor_supressao = None
+            elif dados.tipo_id == 2:
+                dados.nova_data_fim = None
+            elif dados.tipo_id == 4:
+                dados.nova_data_fim = None
+                dados.valor_acrescimo = None
+                dados.valor_supressao = None
 
         atualizado = await self.repo.update(aditivo_id, dados)
         await self.contrato_repo.sincronizar_vigencia_contrato(contrato_id)
