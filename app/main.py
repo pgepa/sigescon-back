@@ -25,9 +25,9 @@ from app.api.routers import tipo_termo_aditivo_router
 from app.api.routers import aditivo_relatorio_router
 from app.api.routers import contrato_responsavel_router
 from app.api.routers import public_router
-# Imports dos sistemas avançados
 from app.core.database import get_db_pool, close_db_pool
 from app.core.config import settings
+from app.core.migration import run_migrations
 from app.middleware.audit import AuditMiddleware
 from app.middleware.logging import setup_logging
 from app.services.notification_service import NotificationScheduler
@@ -78,7 +78,10 @@ async def lifespan(app: FastAPI):
     
     # === STARTUP ===
     try:
-        # 1. Conexão com banco de dados
+        # 1. Execução automática de migrações do banco de dados (Alembic)
+        run_migrations()
+
+        # 2. Conexão com banco de dados
         print("Conectando ao banco de dados...")
         await get_db_pool()
         

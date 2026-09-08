@@ -221,6 +221,24 @@ CREATE DATABASE sigescon;
 psql -U postgres -d sigescon -f database/database.sql
 ```
 
+### 5. Migrações de Banco de Dados com Alembic
+O SIGESCON utiliza o **Alembic** para versionamento de schema e migrações do banco de dados (mesmo padrão do Juris PGE-PA).
+- **Execução Automática**: Ao iniciar a aplicação (`lifespan`), o FastAPI executa automaticamente `alembic upgrade head`. Novas tabelas, alterações de colunas e migrações pendentes são aplicadas de forma transparente tanto em desenvolvimento quanto em homologação e produção.
+- **Comandos Úteis**:
+  ```bash
+  # Ver histórico de migrações
+  alembic history
+
+  # Ver versão atual do banco
+  alembic current
+
+  # Criar uma nova migração
+  alembic revision -m "nome_da_migracao"
+
+  # Aplicar migrações manualmente (opcional)
+  alembic upgrade head
+  ```
+
 ## ⚙️ Configuração
 
 ### 1. Crie o arquivo .env na raiz do projeto
