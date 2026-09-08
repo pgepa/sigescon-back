@@ -1,0 +1,23 @@
+name: Deploy Backend
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ homologation, main ]
+
+jobs:
+  deploy-homolog:
+    name: Deploy Homologação
+    if: github.ref == 'refs/heads/homologation'
+    runs-on: [ self-hosted, homologation ]
+    steps:
+      - name: Executar script de deploy de homologação
+        run: /home/ginf/scripts/sigescon/deploy-back.sh
+
+  deploy-prod:
+    name: Deploy Produção
+    if: github.ref == 'refs/heads/main'
+    runs-on: [ self-hosted, production ]
+    steps:
+      - name: Executar script de deploy de produção
+        run: ~/deploy-back.sh
