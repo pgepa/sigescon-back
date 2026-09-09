@@ -15,13 +15,13 @@ class ContratoRepository:
         # Usar campos específicos para evitar problemas de tipo
         query = """
             INSERT INTO contrato (
-                nr_contrato, objeto, data_inicio, data_fim, data_fim_original, contratado_id,
+                nr_contrato, objeto, data_inicio, data_inicio_original, data_fim, data_fim_original, contratado_id,
                 modalidade_id, status_id, gestor_id, fiscal_id,
                 valor_anual, valor_global, base_legal, termos_contratuais,
                 fiscal_substituto_id, pae, doe, data_doe, garantia,
                 portaria_fiscal, nr_adesao_ata
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
             RETURNING id
         """
 
@@ -30,6 +30,7 @@ class ContratoRepository:
             str(contrato.nr_contrato),
             str(contrato.objeto),
             contrato.data_inicio,
+            contrato.data_inicio,  # data_inicio_original — início de nascença do contrato, imutável
             contrato.data_fim,
             contrato.data_fim,  # data_fim_original — vigência de nascença do contrato, imutável
             int(contrato.contratado_id),
@@ -245,6 +246,24 @@ class ContratoRepository:
                 print("Nenhum dado para atualizar - retornando contrato existente")
                 return await self.find_contrato_by_id(contrato_id)
 
+            # Se a Data Início está sendo editada diretamente no formulário do contrato,
+            # o termo aditivo de Prazo/Misto com data_inicio (se houver) tem precedência.
+            # Se não houver aditivo com início, a data digitada vale e passa a ser data_inicio_original.
+            if 'data_inicio' in update_data:
+                aditivo_inicio = await self.conn.fetchrow(
+                    """
+                    SELECT data_inicio FROM termo_aditivo
+                    WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
+                      AND data_inicio IS NOT NULL
+                    ORDER BY numero_aditivo DESC LIMIT 1
+                    """,
+                    contrato_id
+                )
+                if aditivo_inicio:
+                    update_data['data_inicio'] = aditivo_inicio['data_inicio']
+                else:
+                    update_data['data_inicio_original'] = update_data['data_inicio']
+
             # Se a Data Fim está sendo editada diretamente no formulário do
             # contrato, o termo aditivo de Prazo/Misto ativo (se houver) é quem
             # manda — a edição manual não pode contradizer o que o aditivo já
@@ -349,15 +368,23 @@ class ContratoRepository:
 
     async def sincronizar_vigencia_contrato(self, contrato_id: int) -> None:
         """
-        Recalcula contrato.data_fim a partir do termo aditivo de Prazo/Misto ATIVO
-        de MAIOR NÚMERO (o mais recente) — não da maior data.
-        Também sincroniza o valor_global consolidando aditivos de Valor/Misto ativos.
+        Recalcula contrato.data_inicio e contrato.data_fim a partir do termo aditivo
+        de Prazo/Misto (ativo = TRUE) de MAIOR NÚMERO (o mais recente).
+        Também sincroniza o valor_global consolidando todos os aditivos de Valor/Misto com ativo = TRUE.
         """
         query_vigencia = """
             WITH vigencia AS (
                 SELECT
+                    c.data_inicio AS data_inicio_atual,
                     c.data_fim AS data_fim_atual,
                     s.nome AS status_atual,
+                    COALESCE(
+                        (SELECT data_inicio FROM termo_aditivo
+                         WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
+                           AND data_inicio IS NOT NULL
+                         ORDER BY numero_aditivo DESC LIMIT 1),
+                        c.data_inicio_original
+                    ) AS data_inicio_calculada,
                     COALESCE(
                         (SELECT nova_data_fim FROM termo_aditivo
                          WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
@@ -371,6 +398,7 @@ class ContratoRepository:
             )
             UPDATE contrato c
             SET
+                data_inicio = COALESCE(v.data_inicio_calculada, c.data_inicio),
                 data_fim = v.data_fim_calculada,
                 status_id = CASE
                     WHEN v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE
@@ -382,23 +410,23 @@ class ContratoRepository:
                 updated_at = NOW()
             FROM vigencia v
             WHERE c.id = $1
-              AND v.data_fim_calculada IS NOT NULL
               AND (
-                    v.data_fim_calculada IS DISTINCT FROM v.data_fim_atual
+                    (v.data_inicio_calculada IS NOT NULL AND v.data_inicio_calculada IS DISTINCT FROM v.data_inicio_atual)
+                 OR (v.data_fim_calculada IS NOT NULL AND v.data_fim_calculada IS DISTINCT FROM v.data_fim_atual)
                  OR (v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE)
                  OR (v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE)
               )
         """
         await self.conn.execute(query_vigencia, contrato_id)
 
-        # Sincroniza valor financeiro com aditivos de valor ativos
+        # Sincroniza valor financeiro com todos os aditivos financeiros com ativo = TRUE
         query_valor = """
             WITH totais AS (
                 SELECT 
                     COALESCE(SUM(valor_acrescimo), 0.0) AS soma_acrescimo,
                     COALESCE(SUM(valor_supressao), 0.0) AS soma_supressao
                 FROM termo_aditivo
-                WHERE contrato_id = $1 AND ativo = TRUE AND status = 'Ativo' AND tipo_id IN (2, 3)
+                WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (2, 3)
             )
             UPDATE contrato c
             SET 
@@ -411,17 +439,26 @@ class ContratoRepository:
 
     async def sincronizar_status_vencimento_geral(self) -> List[Dict]:
         """
-        Varre TODOS os contratos ativos e recalcula tudo do zero, em lote:
-        1. data_fim = nova_data_fim do aditivo de Prazo/Misto ATIVO de maior número (ou data_fim_original).
-        2. status = Encerrado se vencido, Ativo se não.
-        3. valor_global sincronizado com aditivos financeiros ativos.
+        Varre TODOS os contratos ativos e recalcula vigência, valor e status em lote:
+        1. data_inicio = data_inicio do aditivo de Prazo/Misto mais recente com data_inicio (ou data_inicio_original).
+        2. data_fim = nova_data_fim do aditivo de Prazo/Misto de maior número (ou data_fim_original).
+        3. status = Encerrado se vencido, Ativo se não (respeita Suspenso e Cancelado).
+        4. valor_global sincronizado com todos os aditivos financeiros (ativo = TRUE).
         """
         query = """
             WITH vigencia_calculada AS (
                 SELECT
                     c.id AS contrato_id,
+                    c.data_inicio AS data_inicio_atual,
                     c.data_fim AS data_fim_atual,
                     s.nome AS status_atual,
+                    COALESCE(
+                        (SELECT ta.data_inicio FROM termo_aditivo ta
+                         WHERE ta.contrato_id = c.id AND ta.ativo = TRUE
+                           AND ta.tipo_id IN (1, 3) AND ta.data_inicio IS NOT NULL
+                         ORDER BY ta.numero_aditivo DESC LIMIT 1),
+                        c.data_inicio_original
+                    ) AS data_inicio_calculada,
                     COALESCE(
                         (SELECT ta.nova_data_fim FROM termo_aditivo ta
                          WHERE ta.contrato_id = c.id AND ta.ativo = TRUE
@@ -435,6 +472,7 @@ class ContratoRepository:
             )
             UPDATE contrato c
             SET
+                data_inicio = COALESCE(v.data_inicio_calculada, c.data_inicio),
                 data_fim = v.data_fim_calculada,
                 status_id = CASE
                     WHEN v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE
@@ -446,9 +484,9 @@ class ContratoRepository:
                 updated_at = NOW()
             FROM vigencia_calculada v
             WHERE c.id = v.contrato_id
-              AND v.data_fim_calculada IS NOT NULL
               AND (
-                    v.data_fim_calculada IS DISTINCT FROM v.data_fim_atual
+                    (v.data_inicio_calculada IS NOT NULL AND v.data_inicio_calculada IS DISTINCT FROM v.data_inicio_atual)
+                 OR (v.data_fim_calculada IS NOT NULL AND v.data_fim_calculada IS DISTINCT FROM v.data_fim_atual)
                  OR (v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE)
                  OR (v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE)
               )
@@ -465,7 +503,7 @@ class ContratoRepository:
                     COALESCE(SUM(valor_acrescimo), 0.0) AS soma_acrescimo,
                     COALESCE(SUM(valor_supressao), 0.0) AS soma_supressao
                 FROM termo_aditivo
-                WHERE ativo = TRUE AND status = 'Ativo' AND tipo_id IN (2, 3)
+                WHERE ativo = TRUE AND tipo_id IN (2, 3)
                 GROUP BY contrato_id
             )
             UPDATE contrato c

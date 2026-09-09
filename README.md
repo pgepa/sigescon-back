@@ -467,6 +467,7 @@ Com o servidor rodando, acesse:
 - `GET /api/v1/status` - Listar status de contratos
 - `GET /api/v1/statusrelatorio` - Listar status de relatórios
 - `GET /api/v1/statuspendencia` - Listar status de pendências
+- `GET /api/v1/termo-contratual` - Listar tipos de termos contratuais (dropdown)
 - `GET /api/v1/contratados` - Listar contratados com paginação
 
 ## 📁 Estrutura do Projeto
