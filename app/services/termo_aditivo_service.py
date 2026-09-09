@@ -44,14 +44,12 @@ class TermoAditivoService:
         return tipo
 
     async def criar(self, contrato_id: int, dados: TermoAditivoCreate) -> TermoAditivo:
-        await self._verificar_contrato(contrato_id)
+        contrato = await self._verificar_contrato(contrato_id)
         await self._validar_tipo(dados.tipo_id)
 
         # Validações de campos obrigatórios gerais
         if not dados.data_assinatura:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data de assinatura é obrigatória.")
-        if not dados.data_inicio:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data de início é obrigatória.")
         if not dados.pae or not dados.pae.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Número do PAE é obrigatório.")
         if not dados.data_publicacao:
@@ -59,12 +57,19 @@ class TermoAditivoService:
         if not dados.objeto or not dados.objeto.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Descrição do termo aditivo é obrigatória.")
 
-        # Validações por natureza
-        if dados.tipo_id in [1, 3] and not dados.nova_data_fim:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Termos aditivos de Prazo ou Misto exigem a definição de 'nova_data_fim'."
-            )
+        # Validações e atribuições por natureza
+        if dados.tipo_id in [1, 3]:  # Prazo ou Misto
+            if not dados.data_inicio:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data de início é obrigatória para aditivos de Prazo ou Misto.")
+            if not dados.nova_data_fim:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Termos aditivos de Prazo ou Misto exigem a definição de 'nova_data_fim'."
+                )
+        else:  # Valor ou Outros obedecem à vigência corrente do contrato
+            dados.data_inicio = None
+            dados.nova_data_fim = contrato.get("data_fim")
+
         if dados.tipo_id in [2, 3] and dados.valor_acrescimo is None and dados.valor_supressao is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -75,16 +80,14 @@ class TermoAditivoService:
         if dados.tipo_id == 1:
             dados.valor_acrescimo = None
             dados.valor_supressao = None
-        elif dados.tipo_id == 2:
-            dados.nova_data_fim = None
         elif dados.tipo_id == 4:
-            dados.nova_data_fim = None
             dados.valor_acrescimo = None
             dados.valor_supressao = None
 
         novo = await self.repo.create(contrato_id, dados)
         await self.contrato_repo.sincronizar_vigencia_contrato(contrato_id)
-        return TermoAditivo.model_validate(novo)
+        await self.repo._recalcular_status_contrato(contrato_id)
+        return TermoAditivo.model_validate(await self.repo.get_by_id(novo["id"]))
 
     async def listar_por_contrato(self, contrato_id: int) -> List[TermoAditivo]:
         await self._verificar_contrato(contrato_id)
@@ -99,22 +102,29 @@ class TermoAditivoService:
         return TermoAditivo.model_validate(item)
 
     async def atualizar(self, contrato_id: int, aditivo_id: int, dados: TermoAditivoUpdate) -> TermoAditivo:
+        contrato = await self._verificar_contrato(contrato_id)
         await self.buscar_por_id(contrato_id, aditivo_id)
         if dados.tipo_id is not None:
             await self._validar_tipo(dados.tipo_id)
+            if dados.tipo_id in [1, 3]:
+                if dados.data_inicio is None:
+                    # Manter ou validar se presente
+                    pass
+            else:
+                dados.data_inicio = None
+                dados.nova_data_fim = contrato.get("data_fim")
+
             if dados.tipo_id == 1:
                 dados.valor_acrescimo = None
                 dados.valor_supressao = None
-            elif dados.tipo_id == 2:
-                dados.nova_data_fim = None
             elif dados.tipo_id == 4:
-                dados.nova_data_fim = None
                 dados.valor_acrescimo = None
                 dados.valor_supressao = None
 
         atualizado = await self.repo.update(aditivo_id, dados)
         await self.contrato_repo.sincronizar_vigencia_contrato(contrato_id)
-        return TermoAditivo.model_validate(atualizado)
+        await self.repo._recalcular_status_contrato(contrato_id)
+        return TermoAditivo.model_validate(await self.repo.get_by_id(aditivo_id))
 
     async def excluir(self, contrato_id: int, aditivo_id: int) -> dict:
         """Inativa o termo aditivo (soft delete)"""
@@ -123,6 +133,7 @@ class TermoAditivoService:
         if not ok:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro ao inativar termo aditivo")
         await self.contrato_repo.sincronizar_vigencia_contrato(contrato_id)
+        await self.repo._recalcular_status_contrato(contrato_id)
         return {"message": "Termo aditivo inativado com sucesso"}
 
     async def excluir_definitivamente(self, contrato_id: int, aditivo_id: int) -> dict:
@@ -132,6 +143,7 @@ class TermoAditivoService:
         if not ok:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Termo aditivo não encontrado")
         await self.contrato_repo.sincronizar_vigencia_contrato(contrato_id)
+        await self.repo._recalcular_status_contrato(contrato_id)
         return {"message": "Termo aditivo excluído definitivamente"}
 
     async def upload_arquivo(

@@ -45,6 +45,7 @@ class ContratoBase(BaseModel):
 class Contrato(ContratoBase):
     id: int
     ativo: bool
+    data_inicio_original: Optional[date] = None
     data_fim_original: Optional[date] = None
     contratado_nome: Optional[str] = None
     modalidade_nome: Optional[str] = None
@@ -64,7 +65,9 @@ class ContratoUpdate(BaseModel):
     nr_contrato: Optional[str] = Field(None, max_length=50)
     objeto: Optional[str] = None
     data_inicio: Optional[date] = None
+    data_inicio_original: Optional[date] = None
     data_fim: Optional[date] = None
+    data_fim_original: Optional[date] = None
     contratado_id: Optional[int] = None
     modalidade_id: Optional[int] = None
     status_id: Optional[int] = None
