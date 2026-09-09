@@ -3,773 +3,522 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-green)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14%2B-blue)](https://www.postgresql.org/)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+[![Alembic](https://img.shields.io/badge/Alembic-Migrations-orange)](https://alembic.sqlalchemy.org/)
 [![Status](https://img.shields.io/badge/Status-Produção-brightgreen)](README.md)
 
-Sistema robusto de gestão de contratos desenvolvido com **FastAPI**, oferecendo uma API RESTful completa para gerenciamento do ciclo de vida de contratos, relatórios fiscais e fluxos de aprovação. **Projeto em produção** com todas as funcionalidades implementadas e testadas.
+API RESTful de alta performance desenvolvida em **FastAPI** para o gerenciamento completo do ciclo de vida de contratos administrativos, termos aditivos, relatórios de fiscalização e pendências da **Procuradoria-Geral do Estado do Pará (PGE-PA)**.
+
+---
 
 ## 📑 Índice
 
-- [🚀 SIGESCON API - Sistema de Gestão de Contratos](#-sigescon-api---sistema-de-gestão-de-contratos)
-  - [📑 Índice](#-índice)
-  - [✨ Características](#-características)
-    - [Core Features](#core-features)
-    - [Módulos Principais](#módulos-principais)
-      - [👤 **Usuários**](#-usuários)
-      - [📋 **Contratos**](#-contratos)
-      - [📝 **Relatórios Fiscais**](#-relatórios-fiscais)
-      - [⏰ **Pendências**](#-pendências)
-  - [🏗 Arquitetura](#-arquitetura)
-    - [Padrões Implementados](#padrões-implementados)
-  - [🛠 Tecnologias](#-tecnologias)
-    - [Backend](#backend)
-    - [Database](#database)
-    - [Testing](#testing)
-  - [📋 Pré-requisitos](#-pré-requisitos)
-  - [🚀 Instalação](#-instalação)
-    - [1. Clone o repositório](#1-clone-o-repositório)
-    - [2. Crie um ambiente virtual](#2-crie-um-ambiente-virtual)
-    - [3. Instale as dependências](#3-instale-as-dependências)
-    - [4. Configure o banco de dados](#4-configure-o-banco-de-dados)
-  - [⚙️ Configuração](#️-configuração)
-    - [1. Crie o arquivo .env na raiz do projeto](#1-crie-o-arquivo-env-na-raiz-do-projeto)
-    - [2. Execute o seeder para dados iniciais](#2-execute-o-seeder-para-dados-iniciais)
-  - [🏃 Execução](#-execução)
-    - [Modo Desenvolvimento](#modo-desenvolvimento)
-    - [Modo Produção](#modo-produção)
-    - [Scheduler (Lembretes automáticos)](#scheduler-lembretes-automáticos)
-  - [🧪 Testes](#-testes)
-    - [Executar todos os testes](#executar-todos-os-testes)
-    - [Script de validação completo](#script-de-validação-completo)
-  - [📖 API Documentation](#-api-documentation)
-    - [Endpoints Principais](#endpoints-principais)
-      - [Autenticação](#autenticação)
-      - [Usuários](#usuários)
-      - [Contratos](#contratos)
-      - [Relatórios](#relatórios)
-      - [Pendências](#pendências)
-      - [Arquivos](#arquivos)
-      - [Tabelas Auxiliares](#tabelas-auxiliares)
-  - [📁 Estrutura do Projeto](#-estrutura-do-projeto)
-  - [🔄 Fluxo de Trabalho](#-fluxo-de-trabalho)
-    - [Fluxo de Relatórios Fiscais](#fluxo-de-relatórios-fiscais)
-    - [Níveis de Acesso](#níveis-de-acesso)
-  - [💻 Desenvolvimento](#-desenvolvimento)
-    - [Convenções de Código](#convenções-de-código)
-    - [Comandos Úteis](#comandos-úteis)
-    - [Variáveis de Ambiente para Desenvolvimento](#variáveis-de-ambiente-para-desenvolvimento)
-  - [🚢 Deploy](#-deploy)
-    - [Docker](#docker)
-    - [Docker Compose](#docker-compose)
-    - [Heroku](#heroku)
-    - [Gunicorn com Uvicorn Workers](#gunicorn-com-uvicorn-workers)
-  - [🤝 Contribuindo](#-contribuindo)
-    - [Guidelines](#guidelines)
-  - [📄 Licença](#-licença)
-  - [👥 Autores](#-autores)
-  - [🙏 Agradecimentos](#-agradecimentos)
-  - [📞 Suporte](#-suporte)
-  - [🔗 Links Úteis](#-links-úteis)
+- [✨ Características](#-características)
+  - [Core Features](#core-features)
+  - [Módulos Principais](#módulos-principais)
+- [🏗 Arquitetura](#-arquitetura)
+  - [Padrões Implementados](#padrões-implementados)
+- [🛠 Tecnologias](#-tecnologias)
+- [📋 Pré-requisitos](#-pré-requisitos)
+- [🚀 Instalação Passo a Passo](#-instalação-passo-a-passo)
+  - [1. Clone o repositório](#1-clone-o-repositório)
+  - [2. Crie e ative o ambiente virtual](#2-crie-e-ative-o-ambiente-virtual)
+  - [3. Instale as dependências](#3-instale-as-dependências)
+  - [4. Configure o banco de dados PostgreSQL](#4-configure-o-banco-de-dados-postgresql)
+  - [5. Configure as variáveis de ambiente (.env)](#5-configure-as-variáveis-de-ambiente-env)
+  - [6. Execute as migrações com Alembic](#6-execute-as-migrações-com-alembic)
+  - [7. Execute o Seeder de dados iniciais](#7-execute-o-seeder-de-dados-iniciais)
+- [🏃 Execução do Servidor](#-execução-do-servidor)
+  - [Modo Desenvolvimento](#modo-desenvolvimento)
+  - [Modo Produção](#modo-produção)
+- [🧪 Testes Automatizados](#-testes-automatizados)
+- [📖 Documentação da API](#-documentação-da-api)
+  - [Endpoints Principais](#endpoints-principais)
+- [📐 Regras de Negócio](#-regras-de-negócio)
+  - [Módulo de Termos Aditivos](#módulo-de-termos-aditivos)
+  - [Múltiplos Perfis e Isolamento de Dados](#múltiplos-perfis-e-isolamento-de-dados)
+  - [Fluxo de Relatórios Fiscais e Pendências](#fluxo-de-relatórios-fiscais-e-pendências)
+- [📁 Estrutura do Projeto](#-estrutura-do-projeto)
+- [💻 Desenvolvimento](#-desenvolvimento)
+- [🤝 Contribuindo](#-contribuindo)
+- [📄 Licença](#-licença)
+
+---
 
 ## ✨ Características
 
 ### Core Features
-- 🔐 **Autenticação JWT** - Sistema seguro de autenticação com tokens e migração automática de senhas
-- 👥 **Sistema de Perfis Múltiplos** - Permite que um único usuário possua vários perfis (ex: Gestor e Fiscal) com alternância de contexto e permissões dinâmicas
-- 🔄 **Contexto de Sessão Ativo** - Alternância real entre perfis com persistência e isolamento automático de dados
-- 🛡️ **Isolamento de Dados** - Fiscal vê apenas seus contratos, Gestor vê apenas os seus, Admin vê todos
-- 📄 **Gestão de Contratos** - CRUD completo com validações avançadas e soft delete
-- 📎 **Upload de Arquivos** - Suporte para múltiplos formatos com validação e organização automática
-- 📊 **Relatórios Fiscais** - Fluxo completo de submissão, análise e aprovação/rejeição
-- 📅 **Pendências e Prazos** - Sistema automatizado de notificações e lembretes
-- 📧 **Notificações por Email** - Integração com SMTP para alertas automáticos personalizados
-- 📈 **Paginação e Filtros** - Busca avançada e filtros dinâmicos em todos os módulos
-- 🔄 **Soft Delete** - Preservação completa do histórico de dados
-- ⚡ **100% Assíncrono** - Alta performance com asyncio e connection pooling
-- 🔍 **Sistema de Auditoria** - Log completo de todas as ações críticas
-- 📋 **Validações Avançadas** - CPF, CNPJ, datas, arquivos e regras de negócio
-- 🎯 **Middleware Customizado** - Logging, auditoria e monitoramento de performance
+- 🔐 **Autenticação JWT Segura**: Geração de tokens de acesso com suporte a expiração configurável e hash de senhas via bcrypt.
+- 👥 **Múltiplos Perfis por Usuário**: Suporte a múltiplos papéis (Administrador, Gestor, Fiscal) atribuídos a um único usuário, com alternância instantânea de contexto em sessão sem necessidade de logout.
+- 🛡️ **Isolamento Automático de Dados**: Filtragem contextual em nível de repositório — Fiscais acessam estritamente seus contratos designados, Gestores visualizam seus contratos supervisionados e Administradores mantêm visão global.
+- 📋 **Gestão do Ciclo de Vida Contratual**: Controle de vigência, prorrogações, garantias, modalidades, anexos contratuais e soft delete com preservação de integridade.
+- 📑 **Termos Aditivos Avançados**: Tratamento especializado de aditivos de **Prazo**, **Valor**, **Misto** e **Outros**, com preservação permanente das datas originais do contrato, obrigatoriedade de campos de vigência, recálculo financeiro dinâmico e controle de coexistência de status (`Ativo`, `Inativo`, `Vencido`).
+- 📝 **Fluxo de Fiscalização e Relatórios**: Submissão de relatórios mensais pelos fiscais com envio de evidências em anexo, análise com aprovação/rejeição motivada por Administradores e ciclo de reenvio inteligente.
+- ⏰ **Pendências Automatizadas**: Criação e encerramento automático de pendências contratuais vinculado à submissão e análise dos relatórios.
+- 🗄️ **Migrações Automatizadas (Alembic)**: Execução automática de migrações pendentes no startup da aplicação (`lifespan`), garantindo sincronia contínua do banco em qualquer ambiente.
+- ⚡ **100% Assíncrono**: Alto rendimento com `FastAPI`, `asyncpg` e connection pooling nativo para PostgreSQL.
+- 🔍 **Auditoria Integrada**: Rastreabilidade de alterações críticas por usuário, data/hora e IP.
+
+---
 
 ### Módulos Principais
 
-#### 👤 **Usuários**
-- Criação e gestão de usuários com validações completas (sem dependência de estruturas legadas)
-- Alteração e reset de senha (própria e administrativa)
-- Sistema de múltiplos perfis com concessão/revogação dinâmica
-- Contexto de sessão ativo com alternância real entre perfis
-- Listagem paginada com filtros avançados
-- Migração automática de senhas do sistema legado
+#### 👤 **Usuários e Múltiplos Perfis**
+- CRUD completo de operadores e colaboradores.
+- Concessão e revogação dinâmica de perfis (`POST /api/v1/usuarios/{id}/perfis/conceder` e `/revogar`).
+- Alternância de contexto de sessão ativo via `POST /auth/alternar-perfil`.
+- Consulta do contexto de sessão e permissões via `GET /auth/contexto`.
+- Alteração da própria senha e reset administrativo de senhas.
 
 #### 📋 **Contratos**
-- Cadastro completo com múltiplos campos e validações
-- **Upload múltiplo** de documentos contratuais (até 10 arquivos, 250MB total)
-- **Gerenciamento de arquivos** - listar, baixar e excluir arquivos por contrato
-- Associação com gestores, fiscais e substitutos
-- Filtros avançados por data, status, responsáveis
-- Controle de prazos e notificações de vencimento
+- Cadastro de contratos com upload múltiplo de documentos (até 10 arquivos / 250 MB total).
+- Designação de Gestor, Fiscal Titular e Fiscais Substitutos.
+- Armazenamento imutável de `data_inicio_original` e `data_fim_original` ao registrar termos aditivos.
+- Soft delete de contratos e restauração com validações de integridade.
+- Download, listagem e exclusão individual de anexos contratuais.
 
-#### 📝 **Relatórios Fiscais**
-- Submissão por fiscais com upload de documentos
-- Análise e aprovação/rejeição por administradores
-- Sistema de reenvio em caso de rejeição com feedback
-- Histórico completo de todas as versões
-- Integração com sistema de pendências
+#### 📑 **Termos Aditivos**
+- Tipificação por natureza: **1 - Prazo**, **2 - Valor**, **3 - Misto**, **4 - Outros**.
+- Exigência estrita de **Nova Data Início** e **Nova Data Fim** para aditivos de Prazo e Misto.
+- Atualização em cascata do contrato vigente mantendo as datas contratuais originais intactas para auditoria.
+- Coexistência de status: um aditivo de Valor não inativa um aditivo de Prazo vigente, permitindo que a vigência estendida permaneça com status `Ativo`.
+- Recálculo contínuo do valor global do contrato a partir dos aditivos financeiros.
+- Relatório analítico consolidado de termos aditivos (`GET /api/v1/aditivos/relatorio`).
 
-#### ⏰ **Pendências**
-- Criação automática e manual de tarefas para fiscais
-- Controle rigoroso de prazos com múltiplos alertas
-- Notificações automáticas em intervalos configuráveis
-- Status de conclusão e histórico de alterações
+#### 📝 **Relatórios Fiscais e Pendências**
+- Submissão de relatórios pelos fiscais acompanhados de arquivos comprobatórios.
+- Avaliação administrativa (Aprovar / Rejeitar com justificativa).
+- Encerramento automático da pendência correspondente após aprovação do relatório.
+- Reenvio com substituição de anexo em caso de relatório devolvido para correção.
+
+---
 
 ## 🏗 Arquitetura
 
-O projeto segue uma arquitetura em camadas (Clean Architecture) com separação clara de responsabilidades:
+O sistema é estruturado conforme os princípios da **Clean Architecture**, dividindo responsabilidades de forma explícita:
 
 ```
-┌─────────────────┐
-│   API Routes    │  ← FastAPI endpoints com validação
-├─────────────────┤
-│   Middlewares   │  ← Auditoria, CORS, tratamento de erros
-├─────────────────┤
-│    Services     │  ← Lógica de negócio e orquestração
-├─────────────────┤
-│  Repositories   │  ← Acesso a dados com queries otimizadas
-├─────────────────┤
-│    Database     │  ← PostgreSQL com connection pooling
-└─────────────────┘
+┌──────────────────────────────────────────────┐
+│                 API Routes                   │  ← Endpoints FastAPI, validação DTO (Pydantic)
+├──────────────────────────────────────────────┤
+│                 Middlewares                  │  ← Auditoria, CORS, Logging, Exception Handlers
+├──────────────────────────────────────────────┤
+│                Service Layer                 │  ← Regras de negócio, cálculos, validações
+├──────────────────────────────────────────────┤
+│              Repository Layer                │  ← Queries otimizadas em AsyncPG e isolamento
+├──────────────────────────────────────────────┤
+│            PostgreSQL 14+ / Alembic          │  ← Schema versionado e Connection Pooling
+└──────────────────────────────────────────────┘
 ```
 
 ### Padrões Implementados
-- **Repository Pattern** - Isolamento completo da camada de dados
-- **Service Layer** - Centralização de toda lógica de negócio
-- **Dependency Injection** - Injeção de dependências nativa do FastAPI
-- **DTO Pattern** - Schemas Pydantic para validação e serialização
-- **Async/Await** - Operações assíncronas em toda a aplicação
-- **Exception Handling** - Tratamento centralizado de exceções customizadas
-- **Middleware Pattern** - Cross-cutting concerns (logging, auditoria, CORS)
+- **Repository Pattern**: Desacoplamento entre o acesso a dados e a camada de serviços.
+- **Service Layer**: Centralização e reutilização de toda a lógica de negócio e regras contratuais.
+- **Dependency Injection**: Injeção nativa de dependências do FastAPI para autenticação, repositórios e conexões.
+- **DTO Pattern**: Schemas Pydantic tipados com validação automática de entrada e serialização de saída.
+- **Async/Await**: Comunicação I/O não bloqueante com o banco de dados e sistema de arquivos.
+
+---
 
 ## 🛠 Tecnologias
 
-### Backend
-- **FastAPI** - Framework web moderno e de alta performance
-- **Pydantic** - Validação de dados e serialização com type hints
-- **asyncpg** - Driver PostgreSQL assíncrono de alta performance
-- **python-jose** - Implementação JWT com criptografia
-- **passlib + bcrypt** - Hashing seguro de senhas com migração automática
-- **aiofiles** - Manipulação assíncrona de arquivos
-- **aiosmtplib** - Envio assíncrono de emails
-- **APScheduler** - Agendamento de tarefas e lembretes
+- **Linguagem**: Python 3.10+
+- **Framework Web**: [FastAPI](https://fastapi.tiangolo.com/)
+- **Driver de Banco Assíncrono**: [asyncpg](https://magicstack.github.io/asyncpg/)
+- **Versionamento de Banco de Dados**: [Alembic](https://alembic.sqlalchemy.org/)
+- **Validação e Serialização**: [Pydantic v2](https://docs.pydantic.dev/)
+- **Segurança**: Python-Jose (JWT) e Passlib / Bcrypt (Hashing de senhas)
+- **Servidor ASGI**: [Uvicorn](https://www.uvicorn.org/) / [Gunicorn](https://gunicorn.org/)
+- **Manipulação de Arquivos e Email**: `aiofiles`, `aiosmtplib`
+- **Agendamento em Segundo Plano**: APScheduler
+- **Testes Automatizados**: `pytest`, `pytest-asyncio`, `httpx`
 
-### Database
-- **PostgreSQL 14+** - Banco de dados relacional com índices otimizados
-- **Connection Pooling** - Pool de conexões para alta performance
-- **Soft Delete** - Preservação de histórico de dados
-- **Índices Condicionais** - Otimização para registros ativos
-
-### Testing
-- **pytest** - Framework de testes robusto
-- **pytest-asyncio** - Suporte completo para testes assíncronos
-- **httpx** - Cliente HTTP assíncrono para testes de API
-- **Fixtures** - Dados de teste organizados e reutilizáveis
+---
 
 ## 📋 Pré-requisitos
 
-- Python 3.10 ou superior
-- PostgreSQL 14 ou superior
-- pip ou uv (gerenciador de pacotes)
-- Git
+Antes de iniciar, certifique-se de possuir instalado em seu ambiente:
+- **Python 3.10** ou superior
+- **PostgreSQL 14** ou superior
+- **Git**
 
-## 🚀 Instalação
+---
+
+## 🚀 Instalação Passo a Passo
+
+Siga a sequência abaixo para clonar, configurar e inicializar a API a partir de um ambiente limpo:
 
 ### 1. Clone o repositório
 ```bash
-git clone https://github.com/rafaelcostati/sigescon-fastapi.git
-cd sigescon-fastapi
+git clone https://github.com/pgepa/sigescon-back.git
+cd sigescon-back
 ```
 
-### 2. Crie um ambiente virtual
+### 2. Crie e ative o ambiente virtual
 ```bash
-# Com venv
+# Criar o ambiente virtual (.venv)
 python -m venv .venv
 
-# Ative o ambiente
-# Linux/Mac:
+# Ativar no Linux / macOS:
 source .venv/bin/activate
-# Windows:
-.venv\Scripts\activate
+
+# Ativar no Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+
+# Ou no Windows (Prompt de Comando):
+.venv\Scripts\activate.bat
 ```
 
 ### 3. Instale as dependências
+O projeto gerencia suas dependências via `pyproject.toml`. Instale em modo editável:
 ```bash
-# Com pip
+# Instalação básica de dependências
 pip install -e .
 
-# Ou com uv (mais rápido)
-uv pip install -e .
+# Ou instalação completa incluindo ferramentas de desenvolvimento e testes:
+pip install -e ".[dev]"
 ```
 
-### 4. Configure o banco de dados
-```bash
-# Acesse o PostgreSQL
-psql -U postgres
-
-# Crie o banco de dados
+### 4. Configure o banco de dados PostgreSQL
+Acesse o seu PostgreSQL e crie a base de dados do sistema:
+```sql
 CREATE DATABASE sigescon;
-\q
-
-# Execute o script de criação das tabelas
-psql -U postgres -d sigescon -f database/database.sql
 ```
 
-### 5. Migrações de Banco de Dados com Alembic
-O SIGESCON utiliza o **Alembic** para versionamento de schema e migrações do banco de dados (mesmo padrão do Juris PGE-PA).
-- **Execução Automática**: Ao iniciar a aplicação (`lifespan`), o FastAPI executa automaticamente `alembic upgrade head`. Novas tabelas, alterações de colunas e migrações pendentes são aplicadas de forma transparente tanto em desenvolvimento quanto em homologação e produção.
-- **Comandos Úteis**:
-  ```bash
-  # Ver histórico de migrações
-  alembic history
+Em seguida, carregue o schema inicial completo do banco utilizando o utilitário `psql`:
+```bash
+psql -U postgres -d sigescon -f database/create_database_complete.sql
+```
 
-  # Ver versão atual do banco
-  alembic current
+### 5. Configure as variáveis de ambiente (.env)
+Copie o arquivo de exemplo `.env.example` para `.env` na raiz de `sigescon-back`:
+```bash
+cp .env.example .env
+```
 
-  # Criar uma nova migração
-  alembic revision -m "nome_da_migracao"
-
-  # Aplicar migrações manualmente (opcional)
-  alembic upgrade head
-  ```
-
-## ⚙️ Configuração
-
-### 1. Crie o arquivo .env na raiz do projeto
+Edite o arquivo `.env` ajustando as credenciais de acesso ao seu banco de dados e as configurações de segurança:
 ```env
 # Banco de Dados
-DATABASE_URL=postgresql://usuario:senha@localhost:5432/sigescon
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sigescon
 
-# JWT
-JWT_SECRET_KEY=sua_chave_secreta_muito_segura_aqui
+# Segurança JWT
+JWT_SECRET_KEY=sua_chave_secreta_super_segura_de_producao_32_caracteres_min
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=720
 
-# CORS (opcional): origens do front, separadas por vírgula. Se omitido, permite qualquer origem
-# e habilita Private Network Access no Chrome quando o Starlette suportar (útil se a API está em IP privado).
-# CORS_ALLOW_ORIGINS=https://app.exemplo.gov.br,http://10.0.0.10:8080
+# CORS (origens permitidas do frontend - opcional, padrão permite todas)
+# CORS_ALLOW_ORIGINS=http://localhost:5173,https://sigescon.pge.pa.gov.br
 
-# Admin padrão (criado pelo seeder)
+# Credenciais do Administrador Padrão
 ADMIN_EMAIL=admin@sigescon.com
 ADMIN_PASSWORD=Admin@123
 
-# Email (Opcional)
+# Configurações de Email / SMTP (Opcional para notificações)
 SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587
-SENDER_EMAIL=seu_email@gmail.com
-SENDER_PASSWORD=sua_senha_app
-
-# Testes (Opcional)
-BASE_URL=http://localhost:8000
-PDF_CONTRATO_PATH=tests/fixtures/contrato_teste.pdf
-TXT_RELATORIO_PATH=tests/fixtures/relatorio_teste.txt
-EMAIL_GESTOR=gestor.teste@example.com
-EMAIL_FISCAL=fiscal.teste@example.com
+SENDER_EMAIL=notificacoes@pge.pa.gov.br
+SENDER_PASSWORD=sua_senha_ou_app_token
 ```
 
-### 2. Execute o seeder para dados iniciais
-O seeder cria a base para o sistema de perfis, status e modalidades.
+### 6. Execute as migrações com Alembic
+O SIGESCON utiliza o **Alembic** para aplicar alterações incrementais na estrutura do banco.
+
+> **Nota**: Ao iniciar a API, o `lifespan` do FastAPI executa automaticamente `alembic upgrade head`. No entanto, você pode aplicar as migrações manualmente a qualquer momento executando:
+
 ```bash
-# Criar dados essenciais (perfis, status, etc.)
-python -c "
-import asyncio
-import asyncpg
-from app.seeder import seed_data
-from app.core.config import settings
-
-async def run_seeder():
-    conn = await asyncpg.connect(settings.DATABASE_URL)
-    await seed_data(conn)
-    await conn.close()
-
-asyncio.run(run_seeder())
-"
+alembic upgrade head
 ```
 
-## 🗄️ Reset Completo do Banco (Desenvolvimento)
-
-Para desenvolvimento e testes, você pode resetar completamente o banco e recriar com dados de exemplo:
-
-### Opção 1: Script Interativo (Recomendado)
+Comandos adicionais úteis do Alembic:
 ```bash
-# Script completo com confirmação e logs detalhados
-python scripts/reset_and_seed_database.py
+# Exibir a versão de migração atual aplicada no banco
+alembic current
+
+# Exibir o histórico de revisões
+alembic history
+
+# Criar uma nova migração a partir de alterações nos modelos
+alembic revision -m "descricao_da_migracao"
 ```
 
-### Opção 2: Script Shell
+### 7. Execute o Seeder de dados iniciais
+Para popular as tabelas auxiliares (perfis de usuário, tipos de termo aditivo, modalidades, status contratuais) e criar o usuário administrador inicial:
 ```bash
-# Execução simplificada com verificações automáticas
-./reset_database.sh
+python run_seed.py
 ```
 
-### Opção 3: SQL Direto
-```bash
-# Para quem prefere SQL puro
-psql -U postgres -d contratos -f scripts/reset_database.sql
-```
+---
 
-### Opção 4: Reset Rápido (CI/CD)
-```bash
-# Sem confirmação interativa
-python scripts/quick_reset.py
-```
-
-**⚠️ ATENÇÃO:** Estes scripts **APAGAM TODOS OS DADOS**! Use apenas em desenvolvimento.
-
-**📋 Dados criados após reset:**
-- **3 usuários padrão** (admin, gestor, fiscal)
-- **3 contratos de exemplo** com documentos
-- **Tabelas de lookup** populadas
-- **Pendências de teste** para workflow completo
-
-**🔑 Credenciais padrão:**
-- Admin: `admin@sigescon.gov.br` / `admin123`
-- Gestor: `gestor@sigescon.gov.br` / `gestor123`
-- Fiscal: `fiscal@sigescon.gov.br` / `fiscal123`
-
-📖 **Documentação completa:** [docs/DATABASE_RESET.md](docs/DATABASE_RESET.md)
-
-## 🏃 Execução
+## 🏃 Execução do Servidor
 
 ### Modo Desenvolvimento
+Inicie a aplicação com hot-reload automático na porta `8000`:
 ```bash
-# Com uvicorn (hot reload automático)
 uvicorn app.main:app --reload --port 8000
-
-# Com configurações customizadas
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --log-level debug
 ```
+A API ficará acessível em: `http://localhost:8000`
 
 ### Modo Produção
+Para ambientes de homologação ou produção, execute com múltiplos workers:
 ```bash
-# Com workers para alta performance
+# Execução direta com Uvicorn
 uvicorn app.main:app --workers 4 --host 0.0.0.0 --port 8000
 
-# Ou com Gunicorn + Uvicorn workers
+# Ou via Gunicorn gerenciando workers Uvicorn
 gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
 
-### Scheduler (Lembretes automáticos)
-```bash
-# O scheduler é iniciado automaticamente com a aplicação
-# Para executar separadamente (opcional):
-python app/scheduler.py
-```
+---
 
-## 🧪 Testes
+## 🧪 Testes Automatizados
 
-### Executar todos os testes
+Execute a suíte de testes com `pytest`:
 ```bash
-# Testes básicos
+# Executar todos os testes assíncronos
 pytest -sv --asyncio-mode=auto
 
-# Com cobertura
+# Executar com relatório de cobertura de código
 pytest --cov=app tests/
 
-# Testes específicos
+# Executar um módulo de teste específico
 pytest tests/test_contratos.py -v
-
-# Com output detalhado
-pytest -v -s
 ```
 
-### Script de validação completo
-```bash
-# Torna o script executável
-chmod +x run_tests.sh
+---
 
-# Executa validação completa
-./run_tests.sh
-```
+## 📖 Documentação da API
 
-## 📖 API Documentation
-
-Com o servidor rodando, acesse:
-
+Com a API em execução, a documentação interativa fica disponível nas seguintes URLs:
 - **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
 - **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
-- **OpenAPI Schema**: [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
+- **OpenAPI JSON**: [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
 - **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
-- **Métricas**: [http://localhost:8000/metrics](http://localhost:8000/metrics)
+
+---
 
 ### Endpoints Principais
 
-#### Autenticação
-- `POST /auth/login` - Realiza o login e retorna o token de acesso, incluindo o `contexto_sessao` com os perfis do usuário.
-- `POST /auth/alternar-perfil` - Permite que o usuário alterne seu perfil de sessão atual.
-- `GET /auth/contexto` - Retorna o contexto de sessão atual do usuário, incluindo perfil e permissões.
-- `GET /auth/dashboard` - Retorna dados contextuais para o dashboard do usuário.
-- `GET /auth/permissoes` - Retorna as permissões do usuário para o contexto de sessão atual.
+#### 🔐 Autenticação & Contexto de Sessão
+| Método | Endpoint | Descrição | Acesso |
+|---|---|---|---|
+| `POST` | `/auth/login` | Autentica usuário, gera JWT e devolve perfis disponíveis | Público |
+| `POST` | `/auth/alternar-perfil` | Alterna o perfil ativo na sessão do usuário logado | Autenticado |
+| `GET` | `/auth/contexto` | Retorna os dados do contexto ativo (perfil, permissões) | Autenticado |
+| `GET` | `/auth/dashboard` | Retorna contadores e métricas contextuais do perfil ativo | Autenticado |
+| `GET` | `/auth/permissoes` | Lista as permissões ativas da sessão | Autenticado |
 
-#### Usuários
-- `GET /api/v1/usuarios` - Listar usuários paginado com filtros (Admin)
-- `POST /api/v1/usuarios` - Criar usuário (Admin)
-- `GET /api/v1/usuarios/{id}` - Buscar usuário específico
-- `PATCH /api/v1/usuarios/{id}` - Atualizar usuário (Admin)
-- `DELETE /api/v1/usuarios/{id}` - Deletar usuário (Admin)
-- `GET /api/v1/usuarios/me` - Dados do usuário logado
-- `PATCH /api/v1/usuarios/{id}/alterar-senha` - Alterar própria senha
-- `PATCH /api/v1/usuarios/{id}/resetar-senha` - Reset de senha (Admin)
-- `GET /api/v1/usuarios/{usuario_id}/perfis` - Lista os perfis associados a um usuário.
-- `POST /api/v1/usuarios/{usuario_id}/perfis/conceder` - Concede um ou mais perfis a um usuário.
-- `POST /api/v1/usuarios/{usuario_id}/perfis/revogar` - Revoga um ou mais perfis de um usuário.
+#### 👤 Gestão de Usuários e Perfis
+| Método | Endpoint | Descrição | Acesso |
+|---|---|---|---|
+| `GET` | `/api/v1/usuarios` | Lista usuários com paginação e filtros | Administrador |
+| `POST` | `/api/v1/usuarios` | Cadastra novo usuário | Administrador |
+| `GET` | `/api/v1/usuarios/{id}` | Obtém detalhes de um usuário | Autenticado |
+| `PATCH` | `/api/v1/usuarios/{id}` | Atualiza dados cadastrais de um usuário | Administrador |
+| `DELETE` | `/api/v1/usuarios/{id}` | Desativa usuário (soft delete) | Administrador |
+| `GET` | `/api/v1/usuarios/me` | Retorna os dados do usuário conectado | Autenticado |
+| `PATCH` | `/api/v1/usuarios/{id}/alterar-senha` | Usuário atualiza a sua própria senha | Autenticado |
+| `PATCH` | `/api/v1/usuarios/{id}/resetar-senha` | Redefinição administrativa de senha | Administrador |
+| `GET` | `/api/v1/usuarios/{id}/perfis` | Lista os perfis atribuídos a um usuário | Autenticado |
+| `POST` | `/api/v1/usuarios/{id}/perfis/conceder`| Atribui novos perfis ao usuário | Administrador |
+| `POST` | `/api/v1/usuarios/{id}/perfis/revogar` | Revoga perfis do usuário | Administrador |
 
-#### Contratos
-- `GET /api/v1/contratos` - Listar contratos com filtros avançados e paginação
-- `POST /api/v1/contratos` - Criar contrato com upload múltiplo (Admin)
-- `GET /api/v1/contratos/{id}` - Detalhes completos do contrato
-- `PATCH /api/v1/contratos/{id}` - Atualizar contrato com arquivos adicionais (Admin)
-- `DELETE /api/v1/contratos/{id}` - Deletar contrato (Admin)
+#### 📋 Gestão de Contratos
+| Método | Endpoint | Descrição | Acesso |
+|---|---|---|---|
+| `GET` | `/api/v1/contratos` | Lista contratos (filtrados pelo perfil ativo) | Autenticado |
+| `POST` | `/api/v1/contratos` | Cadastra contrato com upload de documentos | Administrador |
+| `GET` | `/api/v1/contratos/{id}` | Obtém detalhes completos do contrato | Autenticado |
+| `PATCH` | `/api/v1/contratos/{id}` | Atualiza contrato e adiciona novos anexos | Administrador |
+| `DELETE` | `/api/v1/contratos/{id}` | Exclusão lógica (soft delete) | Administrador |
+| `GET` | `/api/v1/contratos/{id}/arquivos` | Lista anexos vinculados ao contrato | Autenticado |
+| `DELETE` | `/api/v1/contratos/{id}/arquivos/{arq_id}` | Remove um anexo do contrato | Administrador |
 
-#### Gerenciamento de Arquivos
-- `GET /api/v1/contratos/{id}/arquivos` - Listar arquivos do contrato
-- `GET /api/v1/contratos/{id}/arquivos/{arquivo_id}/download` - Download de arquivo
-- `DELETE /api/v1/contratos/{id}/arquivos/{arquivo_id}` - Excluir arquivo (Admin)
-- `GET /api/v1/arquivos/relatorios/contrato/{id}` - **NOVO** - Listar arquivos de relatórios separadamente
+#### 📑 Termos Aditivos
+| Método | Endpoint | Descrição | Acesso |
+|---|---|---|---|
+| `GET` | `/api/v1/tipos-termo-aditivo` | Lista os tipos de aditivo (Prazo, Valor, Misto, Outros) | Autenticado |
+| `GET` | `/api/v1/contratos/{id}/aditivos` | Lista termos aditivos de um contrato específico | Autenticado |
+| `POST` | `/api/v1/contratos/{id}/aditivos` | Registra novo aditivo com regras de vigência e valor | Administrador |
+| `GET` | `/api/v1/contratos/{id}/aditivos/{aditivo_id}` | Obtém detalhes de um termo aditivo | Autenticado |
+| `PATCH` | `/api/v1/contratos/{id}/aditivos/{aditivo_id}` | Atualiza dados do termo aditivo | Administrador |
+| `DELETE` | `/api/v1/contratos/{id}/aditivos/{aditivo_id}` | Inativação lógica do termo aditivo | Administrador |
+| `DELETE` | `/api/v1/contratos/{id}/aditivos/{aditivo_id}/permanente` | Exclusão definitiva de aditivo | Administrador |
+| `POST` | `/api/v1/contratos/{id}/aditivos/{aditivo_id}/arquivo` | Upload de arquivo digitalizado do aditivo | Administrador |
+| `GET` | `/api/v1/aditivos/relatorio` | Relatório analítico consolidado de aditivos | Autenticado |
 
-#### Relatórios e Pendências
-- `GET /api/v1/contratos/{id}/relatorios` - Listar relatórios do contrato
-- `POST /api/v1/contratos/{id}/relatorios` - Submeter relatório com arquivo (Fiscal/Admin)
-- `PATCH /api/v1/contratos/{id}/relatorios/{id}/analise` - **ATUALIZADO** - Analisar relatório (aprovar/rejeitar)
-- `GET /api/v1/contratos/{id}/pendencias` - Listar pendências do contrato
-- `POST /api/v1/contratos/{id}/pendencias` - Criar pendência (Admin)
-- `PATCH /api/v1/contratos/{id}/pendencias/{id}/cancelar` - **NOVO** - Cancelar pendência (Admin)
-- `GET /api/v1/contratos/{id}/pendencias/contador` - **NOVO** - Contador por status para dashboard
+#### 📝 Relatórios Fiscais e Pendências
+| Método | Endpoint | Descrição | Acesso |
+|---|---|---|---|
+| `GET` | `/api/v1/contratos/{id}/relatorios` | Lista relatórios fiscais do contrato | Autenticado |
+| `POST` | `/api/v1/contratos/{id}/relatorios` | Fiscal submete relatório mensal com arquivo | Fiscal / Admin |
+| `PATCH` | `/api/v1/contratos/{id}/relatorios/{id}/analise` | Aprova ou rejeita relatório com parecer | Administrador |
+| `GET` | `/api/v1/contratos/{id}/pendencias` | Lista pendências de relatórios do contrato | Autenticado |
+| `POST` | `/api/v1/contratos/{id}/pendencias` | Cria pendência de relatório manualmente | Administrador |
+| `PATCH` | `/api/v1/contratos/{id}/pendencias/{id}/cancelar` | Cancela pendência de relatório | Administrador |
+| `GET` | `/api/v1/contratos/{id}/pendencias/contador` | Contadores de pendências por status | Autenticado |
+| `GET` | `/api/v1/dashboard/fiscal/minhas-pendencias` | Pendências atribuídas ao fiscal logado | Fiscal |
 
-#### Dashboard do Fiscal
-- `GET /api/v1/dashboard/fiscal/minhas-pendencias` - **NOVO** - Pendências específicas do fiscal logado
-- `GET /api/v1/dashboard/fiscal/completo` - **NOVO** - Dashboard completo do fiscal
+#### 📁 Downloads e Tabelas Auxiliares
+| Método | Endpoint | Descrição | Acesso |
+|---|---|---|---|
+| `GET` | `/api/v1/arquivos/{id}/download` | Download seguro de arquivo anexado | Autenticado |
+| `GET` | `/api/v1/modalidades` | Lista modalidades de licitação | Autenticado |
+| `GET` | `/api/v1/status` | Lista status possíveis de contratos | Autenticado |
+| `GET` | `/api/v1/statusrelatorio` | Lista status de relatórios fiscais | Autenticado |
+| `GET` | `/api/v1/statuspendencia` | Lista status de pendências | Autenticado |
+| `GET` | `/api/v1/termo-contratual` | Lista tipos de instrumentos contratuais | Autenticado |
+| `GET` | `/api/v1/contratados` | Lista fornecedores/empresas contratadas | Autenticado |
 
-#### Arquivos
-- `GET /api/v1/arquivos/{id}/download` - Download de arquivos com controle de acesso
+---
 
-#### Termos Aditivos e Robô de Sincronização
-- `GET /api/v1/tipos-termo-aditivo` - Listar tipos de termo aditivo (1 - Prazo, 2 - Valor, 3 - Misto, 4 - Outros)
-- `GET /api/v1/contratos/{id}/aditivos` - Listar termos aditivos do contrato
-- `POST /api/v1/contratos/{id}/aditivos` - Criar termo aditivo com validação de tipo e inativação seletiva
-- `GET /api/v1/contratos/{id}/aditivos/{aditivo_id}` - Buscar termo aditivo por ID
-- `PATCH /api/v1/contratos/{id}/aditivos/{aditivo_id}` - Atualizar termo aditivo
-- `DELETE /api/v1/contratos/{id}/aditivos/{aditivo_id}` - Inativar termo aditivo (soft delete)
-- `DELETE /api/v1/contratos/{id}/aditivos/{aditivo_id}/permanente` - Excluir definitivamente (hard delete)
-- `POST /api/v1/contratos/{id}/aditivos/{aditivo_id}/arquivo` - Upload de arquivo vinculado ao aditivo
-- `GET /api/v1/aditivos/relatorio` - Relatório consolidado de termos aditivos de todos os contratos
+## 📐 Regras de Negócio
 
-#### Tabelas Auxiliares
-- `GET /api/v1/tipos-termo-aditivo` - Listar tipos de termo aditivo (FK)
-- `GET /api/v1/perfis` - Listar perfis de usuário
-- `GET /api/v1/modalidades` - Listar modalidades de contratação
-- `GET /api/v1/status` - Listar status de contratos
-- `GET /api/v1/statusrelatorio` - Listar status de relatórios
-- `GET /api/v1/statuspendencia` - Listar status de pendências
-- `GET /api/v1/termo-contratual` - Listar tipos de termos contratuais (dropdown)
-- `GET /api/v1/contratados` - Listar contratados com paginação
+### Módulo de Termos Aditivos
+
+Os termos aditivos seguem regras estritas para preservar a segurança jurídica e a integridade do histórico contratual:
+
+1. **Tipos de Aditivo**:
+   - **Prazo**: Altera o período de vigência. Exige **Nova Data Início** e **Nova Data Fim**.
+   - **Valor**: Altera o valor global do contrato (acréscimo ou supressão). Exige **Valor Aditivo**.
+   - **Misto**: Altera concomitantemente vigência e valor. Exige **Nova Data Início**, **Nova Data Fim** e **Valor Aditivo**.
+   - **Outros**: Modificações qualitativas ou cláusulas gerais sem alteração de prazo ou valor.
+
+2. **Preservação de Datas Originais**:
+   - Ao cadastrar o primeiro aditivo de Prazo ou Misto, as datas originais do contrato são gravadas de forma permanente e imutável nas colunas `data_inicio_original` e `data_fim_original`.
+   - As colunas `data_inicio` e `data_fim` do contrato são atualizadas para refletir a vigência ativa do aditivo.
+
+3. **Coexistência de Status**:
+   - Quando um novo aditivo de Prazo entra em vigor com status `Ativo`, ele substitui a vigência de aditivos de prazo anteriores.
+   - O cadastro subsequente de um aditivo de **Valor** NÃO inativa o aditivo de **Prazo** vigente, pois a prorrogação temporal continua em vigor. Ambos coexistem como `Ativo`.
+   - Se o término da vigência estipulado pelo aditivo expirar, o robô de sincronização atualiza o status para `Vencido`.
+
+4. **Impacto Financeiro no Valor Global**:
+   - Para termos de Valor e Misto, o campo `valor_aditivo` (positivo ou negativo) é somado ao `valor_global` do contrato.
+   - Em caso de cancelamento ou exclusão do termo aditivo, o montante correspondente é devidamente estornado do contrato.
+
+---
+
+### Múltiplos Perfis e Isolamento de Dados
+
+O SIGESCON implementa o conceito de múltiplos papéis por usuário:
+- Um usuário pode ser simultaneamente **Gestor** de determinados contratos e **Fiscal** de outros.
+- O endpoint `POST /auth/alternar-perfil` chaveia o perfil ativo sem exigir novo login.
+- O repositório filtra automaticamente os registros com base no perfil ativo:
+  - **Administrador**: Visão irrestrita de todos os contratos, termos e relatórios do órgão.
+  - **Gestor**: Acesso restrito aos contratos nos quais atua como Gestor.
+  - **Fiscal**: Acesso restrito aos contratos nos quais foi nomeado como Fiscal Titular ou Substituto.
+
+---
+
+### Fluxo de Relatórios Fiscais e Pendências
+
+```mermaid
+graph TD
+    A[Geração de Pendência Mensal] --> B[Fiscal Notificado]
+    B --> C[Fiscal Submete Relatório + Anexo PDF]
+    C --> D[Status: Pendente de Análise]
+    D --> E{Análise pelo Administrador}
+    E -->|Aprovado| F[Relatório: Aprovado<br/>Pendência: Concluída]
+    E -->|Rejeitado| G[Relatório: Rejeitado com Parecer<br/>Pendência: Retorna a Pendente]
+    G --> H[Fiscal Corrige e Reenvia Anexo]
+    H --> D
+```
+
+---
 
 ## 📁 Estrutura do Projeto
 
 ```
-sigescon-fastapi/
+sigescon-back/
+├── alembic/                      # Configurações e scripts de migração do Alembic
+│   ├── env.py                    # Script de contexto do Alembic
+│   ├── script.py.mako            # Template para novas revisões
+│   └── versions/                 # Arquivos de migração versionados
+├── alembic.ini                   # Arquivo de configuração do Alembic
 ├── app/
-│   ├── api/
-│   │   ├── dependencies.py         # Injeção de dependências
-│   │   ├── permissions.py          # Controle de permissões
-│   │   ├── doc_dependencies.py     # Proteção da documentação
-│   │   ├── exception_handlers.py   # Tratamento de exceções
-│   │   └── routers/                # Endpoints da API
+│   ├── api/                      # Roteamento e camada HTTP
+│   │   ├── dependencies.py       # Injeção de dependências e autenticação
+│   │   ├── permissions.py        # Validação de permissões por perfil
+│   │   ├── doc_dependencies.py   # Proteção da documentação OpenAPI
+│   │   ├── exception_handlers.py # Tratamento global de exceções
+│   │   └── routers/              # Controladores REST organizados por módulo
 │   │       ├── auth_router.py
 │   │       ├── contrato_router.py
+│   │       ├── termo_aditivo_router.py
+│   │       ├── relatorio_router.py
+│   │       ├── pendencia_router.py
 │   │       ├── usuario_router.py
 │   │       ├── arquivo_router.py
 │   │       └── ...
-│   ├── core/
-│   │   ├── config.py              # Configurações globais
-│   │   ├── database.py            # Pool de conexões
-│   │   ├── security.py            # JWT e hashing
-│   │   └── exceptions.py          # Exceções customizadas
-│   ├── middleware/
-│   │   ├── audit.py               # Middleware de auditoria
-│   │   └── logging.py             # Configuração de logs
-│   ├── repositories/              # Camada de dados
-│   │   ├── usuario_repo.py
+│   ├── core/                     # Configurações centrais da aplicação
+│   │   ├── config.py             # Variáveis de ambiente e settings (Pydantic)
+│   │   ├── database.py           # Conexão e pool assíncrono AsyncPG
+│   │   ├── security.py           # JWT, criptografia e validação de senhas
+│   │   └── exceptions.py         # Exceções customizadas da aplicação
+│   ├── middleware/               # Middlewares ASGI
+│   │   ├── audit.py              # Auditoria de requisições e ações
+│   │   └── logging.py            # Log estruturado
+│   ├── repositories/             # Camada de persistência (queries AsyncPG)
 │   │   ├── contrato_repo.py
+│   │   ├── termo_aditivo_repo.py
+│   │   ├── usuario_repo.py
+│   │   ├── relatorio_repo.py
 │   │   └── ...
-│   ├── schemas/                   # Modelos Pydantic
-│   │   ├── usuario_schema.py
+│   ├── schemas/                  # Schemas DTO de entrada e saída (Pydantic)
 │   │   ├── contrato_schema.py
+│   │   ├── termo_aditivo_schema.py
+│   │   ├── usuario_schema.py
 │   │   └── ...
-│   ├── services/                  # Lógica de negócio
-│   │   ├── usuario_service.py
+│   ├── services/                 # Regras de negócio e casos de uso
 │   │   ├── contrato_service.py
+│   │   ├── termo_aditivo_service.py
 │   │   ├── email_service.py
 │   │   ├── file_service.py
-│   │   └── notification_service.py
-│   ├── main.py                   # Aplicação FastAPI
-│   ├── seeder.py                 # Popular dados iniciais
-│   └── scheduler.py              # Tarefas agendadas
-├── database/
-│   └── database.sql              # Script completo do banco
-├── tests/                        # Testes automatizados
-│   ├── conftest.py
-│   ├── test_usuarios.py
-│   ├── test_contratos.py
-│   ├── test_auth.py
-│   └── fixtures/                 # Arquivos de teste
-├── uploads/                      # Arquivos enviados
-├── logs/                         # Arquivos de log
-├── .env.example                  # Exemplo de configuração
-├── .gitignore
-├── pyproject.toml                # Configuração do projeto
-├── pytest.ini                   # Configuração de testes
-├── README.md
-└── run_tests.sh                  # Script de validação
+│   │   └── ...
+│   ├── main.py                   # Ponto de entrada da aplicação FastAPI e lifespan
+│   ├── seeder.py                 # Funções para carga inicial de dados
+│   └── scheduler.py              # Agendador de tarefas periódicas (APScheduler)
+├── database/                     # Scripts de banco de dados
+│   └── create_database_complete.sql # Dump completo da estrutura do banco
+├── tests/                        # Testes automatizados com Pytest
+├── uploads/                      # Diretório de armazenamento de anexos
+├── logs/                         # Registros de log de execução
+├── .env.example                  # Template das variáveis de ambiente
+├── pyproject.toml                # Definição do pacote e dependências Python
+├── pytest.ini                   # Configurações do Pytest
+├── run_seed.py                   # Script para execução simples do seeder
+└── README.md                     # Documentação oficial do backend
 ```
 
-## 🔄 Fluxo de Trabalho
-
-### Fluxo de Relatórios Fiscais
-
-```mermaid
-graph LR
-    A[Admin cria Pendência<br/>Status: Pendente] --> B[Fiscal recebe email]
-    B --> C{Fiscal responde}
-    C -->|Envia Relatório + PDF| D[Relatório: Pendente de Análise<br/>Pendência: Aguardando Análise]
-    C -->|Não responde| E[Lembrete automático]
-    E --> C
-    A --> F[Admin pode cancelar]
-    F --> G[Fiscal recebe email de cancelamento]
-    D --> H[Admin analisa relatório]
-    H --> I{Decisão}
-    I -->|Aprova| J[Relatório: Aprovado<br/>Pendência: Concluída]
-    I -->|Rejeita| K[Relatório: Rejeitado<br/>Pendência: volta para Pendente]
-    K --> L[Fiscal recebe feedback]
-    L --> M[Fiscal reenvia<br/>Substitui arquivo anterior]
-    M --> D
-    J --> N[Fiscal recebe confirmação]
-```
-
-### 🆕 Principais Melhorias no Fluxo de Pendências
-
-#### **Cancelamento de Pendências**
-- Administradores podem cancelar pendências via `PATCH /contratos/{id}/pendencias/{id}/cancelar`
-- Fiscal recebe notificação automática por email
-- Status muda para "Cancelada" e não requer mais ação do fiscal
-
-#### **Upload e Gestão de Relatórios com Arquivos**
-- Fiscais podem enviar PDFs, DOCs, XLS ou qualquer arquivo como resposta
-- **Reenvio inteligente**: Novo arquivo substitui automaticamente o anterior
-- **Visualização separada**: Arquivos de relatórios ficam separados dos arquivos contratuais
-- Endpoint dedicado: `GET /arquivos/relatorios/contrato/{id}`
-
-#### **Análise Aprimorada pelo Administrador**
-- **Aprovar**: Relatório aceito, pendência finalizada
-- **Rejeitar**: Com observações, fiscal pode corrigir e reenviar
-- Notificações automáticas por email em todas as decisões
-
-#### **Dashboard com Contadores**
-- Endpoint `GET /pendencias/contador` retorna estatísticas em tempo real
-- Permite exibir badges no frontend: "Pendências(3)" se houver ações necessárias
-- **Novos Status de Pendências:**
-  - **Pendente**: Aguardando envio de relatório pelo fiscal
-  - **Aguardando Análise**: Relatório enviado, aguardando análise do administrador
-  - **Concluída**: Relatório aprovado pelo administrador
-  - **Cancelada**: Pendência cancelada pelo administrador
-
-### Níveis de Acesso
-
-O sistema utiliza um modelo de perfis flexível com **isolamento automático de dados**, onde um usuário pode ter múltiplos papéis e alternar entre eles com persistência real. As permissões são contextuais, baseadas no perfil que está ativo na sessão do usuário.
-
-| Perfil        | Permissões Principais (quando ativo) | Isolamento de Dados |
-|---------------|------------------------------------------------------|---------------------|
-| **Administrador** | Acesso total ao sistema, incluindo criação de usuários, gestão de perfis e aprovação de relatórios. | Vê **todos** os contratos |
-| **Gestor** | Visualização e gestão de contratos sob sua responsabilidade, análise de relatórios da sua equipe. | Vê **apenas** contratos onde é gestor |
-| **Fiscal** | Submissão de relatórios para seus contratos designados e visualização de pendências. | Vê **apenas** contratos onde é fiscal/substituto |
-
-#### **Exemplo Prático de Isolamento:**
-```
-Usuário: João Silva
-- Fiscal nos contratos: CON-001, CON-002
-- Gestor no contrato: CON-003
-
-Sessão como Fiscal (perfil ativo):
-GET /api/v1/contratos/ → Retorna apenas CON-001 e CON-002
-
-Alterna para Gestor:
-POST /auth/alternar-perfil {"novo_perfil_id": 2}
-
-Sessão como Gestor (perfil ativo):
-GET /api/v1/contratos/ → Retorna apenas CON-003
-```
-
-A alternância entre perfis é **persistente** e **automática**, não requerendo logout e garantindo isolamento rigoroso dos dados.
+---
 
 ## 💻 Desenvolvimento
 
 ### Convenções de Código
+- **PEP 8**: Padrão de estilo estritamente seguido em todos os módulos.
+- **Tipagem Estática**: Uso rigoroso de Type Hints em todas as rotas, serviços e repositórios.
+- **AsyncPG com Prepared Statements**: Consultas parametrizadas prevenindo qualquer vulnerabilidade a SQL Injection.
+- **Soft Delete**: Entidades críticas mantêm a flag `ativo = false` para auditoria e preservação histórica.
 
-- **PEP 8** - Style guide para Python rigorosamente seguido
-- **Type Hints** - Tipagem completa em todas as funções
-- **Docstrings** - Documentação detalhada em todos os módulos
-- **Async/Await** - Para todas as operações I/O sem exceção
-- **Error Handling** - Tratamento específico para cada tipo de erro
-- **Soft Delete** - Preservação de dados em todas as entidades
-
-### Comandos Úteis
-
-```bash
-# Formatar código
-black app/ tests/
-
-# Verificar tipos
-mypy app/
-
-# Ordenar imports
-isort app/ tests/
-
-# Verificar estilo
-flake8 app/ tests/
-
-# Executar todos os testes
-pytest
-
-# Executar servidor de desenvolvimento
-uvicorn app.main:app --reload
-```
-
-### Variáveis de Ambiente para Desenvolvimento
-
-```bash
-# Debug mode
-export DEBUG=True
-
-# Log level
-export LOG_LEVEL=DEBUG
-
-# Reload on changes
-export RELOAD=True
-```
-
-## 🚢 Deploy
-
-### Docker
-
-```dockerfile
-FROM python:3.10-slim
-
-WORKDIR /app
-
-COPY pyproject.toml .
-RUN pip install -e .
-
-COPY . .
-
-EXPOSE 8000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-### Docker Compose
-
-```yaml
-version: '3.8'
-
-services:
-  api:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql://user:pass@db:5432/sigescon
-      - JWT_SECRET_KEY=your-secret-key
-    depends_on:
-      - db
-
-  db:
-    image: postgres:14
-    environment:
-      - POSTGRES_DB=sigescon
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=pass
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-volumes:
-  postgres_data:
-```
-
-### Heroku
-
-```bash
-# Procfile
-web: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
-
-### Gunicorn com Uvicorn Workers
-
-```bash
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-```
+---
 
 ## 🤝 Contribuindo
 
-1. Fork o projeto
-2. Crie sua feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
-4. Push para a branch (`git push origin feature/AmazingFeature`)
-5. Abra um Pull Request
+1. Crie uma branch para sua modificação:
+   ```bash
+   git checkout -b feature/minha-melhoria
+   ```
+2. Realize os testes automatizados locais:
+   ```bash
+   pytest -sv --asyncio-mode=auto
+   ```
+3. Envie suas alterações para o repositório institucional:
+   ```bash
+   git commit -m "feat: implementar nova funcionalidade"
+   git push origin feature/minha-melhoria
+   ```
 
-### Guidelines
-
-- Escreva testes para todas as novas funcionalidades
-- Mantenha a cobertura de testes acima de 80%
-- Siga rigorosamente as convenções de código do projeto
-- Atualize a documentação quando necessário
-- Use type hints em todo o código
-- Implemente tratamento de erros adequado
+---
 
 ## 📄 Licença
 
-Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
-
-## 👥 Autores
-
-- **Rafael Costa** - *Desenvolvimento e Arquitetura* - [@rafaelcostati](https://github.com/rafaelcostati)
-
-## 🙏 Agradecimentos
-
-- FastAPI pela excelente framework e performance
-- Comunidade Python pelo suporte e bibliotecas
-- PostgreSQL pela robustez e confiabilidade
-- Todos os contribuidores e testadores
-
-## 📞 Suporte
-
-Para suporte técnico:
-- 📧 Email: suporte.sigescon@gmail.com
-- 🐛 Issues: [GitHub Issues](https://github.com/rafaelcostati/sigescon-fastapi/issues)
-- 📖 Documentação: Acesse `/docs` com o servidor rodando
-
-## 📚 Documentação Adicional
-
-### Documentação Completa
-- **`CLAUDE.md`** - Documentação técnica detalhada da API, arquitetura e funcionalidades
-- **`FLUXO_USUARIOS_MULTIPLOS_PERFIS.md`** - Guia completo para implementação do frontend React TypeScript
-
-### Funcionalidades Documentadas
-- ✅ **Sistema de Pendências e Relatórios** - Fluxo completo com upload de arquivos
-- ✅ **Múltiplos Perfis por Usuário** - Alternância de contexto sem logout
-- ✅ **Sistema de Notificações** - Templates de email para todas as ações
-- ✅ **Gerenciamento de Arquivos** - Separação entre arquivos contratuais e de relatórios
-- ✅ **Dashboard Inteligente** - Contadores em tempo real por status
-
-## 🔗 Links Úteis
-
-- [Documentação FastAPI](https://fastapi.tiangolo.com/)
-- [Documentação Pydantic](https://pydantic-docs.helpmanual.io/)
-- [PostgreSQL Documentation](https://www.postgresql.org/docs/)
-- [pytest Documentation](https://docs.pytest.org/en/latest/)
-- [AsyncPG Documentation](https://magicstack.github.io/asyncpg/current/)
+Este projeto é desenvolvido e mantido pela **Procuradoria-Geral do Estado do Pará (PGE-PA)**. Todos os direitos reservados.
