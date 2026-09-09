@@ -60,7 +60,7 @@ class TermoAditivoService:
         # Validações e atribuições por natureza
         if dados.tipo_id in [1, 3]:  # Prazo ou Misto
             if not dados.data_inicio:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data de início é obrigatória para aditivos de Prazo ou Misto.")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nova data de início é obrigatória para aditivos de Prazo ou Misto.")
             if not dados.nova_data_fim:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
