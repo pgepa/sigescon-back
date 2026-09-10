@@ -84,6 +84,23 @@ class TermoAditivoService:
             dados.valor_acrescimo = None
             dados.valor_supressao = None
 
+        # Auditoria Lei 14.133/2021 e Súmula 282 TCU:
+        # Se o contrato estiver Encerrado e receber aditivo de prazo/misto, registrar em auditoria
+        data_fim_anterior = contrato.get("data_fim")
+        if contrato.get("status_id") == 3 or (data_fim_anterior and data_fim_anterior < dados.data_assinatura):
+            if dados.tipo_id in [1, 3]:
+                if data_fim_anterior and dados.data_assinatura > data_fim_anterior:
+                    logger.warning(
+                        f"[AUDITORIA - LEI 14.133/2021] Termo aditivo de prazo cadastrado para contrato {contrato_id} "
+                        f"com data de assinatura ({dados.data_assinatura}) posterior ao término da vigência anterior ({data_fim_anterior}). "
+                        f"Alerta de conformidade com a Súmula 282/TCU."
+                    )
+                else:
+                    logger.info(
+                        f"[AUDITORIA - LEI 14.133/2021] Regularização tempestiva de contrato {contrato_id} anteriormente encerrado "
+                        f"mediante termo aditivo assinado em {dados.data_assinatura} (antes ou no termo da vigência anterior {data_fim_anterior})."
+                    )
+
         novo = await self.repo.create(contrato_id, dados)
         await self.contrato_repo.sincronizar_vigencia_contrato(contrato_id)
         await self.repo._recalcular_status_contrato(contrato_id)
