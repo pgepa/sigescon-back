@@ -36,7 +36,11 @@ class TermoAditivoRepository:
                 valor_acrescimo, valor_supressao, pae, observacoes, ativo, status, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, $12, TRUE,
-                CASE WHEN $8::date IS NOT NULL AND $8::date < CURRENT_DATE THEN 'Vencido' ELSE 'Ativo' END,
+                CASE 
+                    WHEN $3 IN (1, 3) AND $8::date IS NOT NULL AND $8::date < CURRENT_DATE THEN 'Vencido'
+                    WHEN $3 IN (1, 3) AND $7::date IS NOT NULL AND $7::date > CURRENT_DATE THEN 'Aguardando Vigência'
+                    ELSE 'Ativo'
+                END,
                 NOW(), NOW()
             )
             RETURNING id
@@ -52,13 +56,16 @@ class TermoAditivoRepository:
 
     async def _recalcular_status_contrato(self, contrato_id: int) -> None:
         """
-        Recalcula o `status` (Ativo/Vencido/Inativo) dos termos aditivos do contrato:
-        1. 'Vencido': Se o contrato estiver com status 'Encerrado' ou sua vigência estiver expirada (data_fim < CURRENT_DATE),
-           TODOS os termos aditivos com ativo = TRUE tornam-se 'Vencido'.
-        2. 'Ativo': Quando o contrato está vigente, APENAS o termo aditivo com o MAIOR numero_aditivo (ativo = TRUE)
-           permanece com status 'Ativo'.
-        3. 'Inativo': Todos os termos aditivos anteriores (numero_aditivo < max_numero_ativo) tornam-se 'Inativo'.
-           Termos excluídos (ativo = FALSE) também são 'Inativo'.
+        Recalcula o `status` (Ativo/Aguardando Vigência/Vencido/Inativo) dos termos aditivos do contrato:
+        1. 'Inativo': Registros com ativo = FALSE (excluídos/cancelados).
+        2. Aditivos de Prazo/Misto (tipo_id IN (1, 3)):
+           - 'Vencido': Se nova_data_fim < CURRENT_DATE (imutabilidade histórica permanente).
+           - 'Aguardando Vigência': Se data_inicio > CURRENT_DATE (efeito prospectivo/futuro).
+           - 'Ativo': Aditivo de maior número dentro da vigência presente (data_inicio <= CURRENT_DATE AND nova_data_fim >= CURRENT_DATE).
+           - 'Vencido': Aditivos antecessores substituídos pela prorrogação mais recente.
+        3. Aditivos de Valor/Outros (tipo_id IN (2, 4)):
+           - 'Vencido': Se o contrato estiver extinto (status 'Encerrado' ou data_fim < CURRENT_DATE).
+           - 'Ativo': Enquanto o contrato estiver vigente (coexistem múltiplos aditivos de valor cumulativos).
         """
         await self.conn.execute(
             """
@@ -72,8 +79,16 @@ class TermoAditivoRepository:
                 SELECT 
                     ta.id,
                     ta.numero_aditivo,
+                    ta.tipo_id,
+                    ta.data_inicio,
+                    ta.nova_data_fim,
                     ta.ativo,
-                    MAX(ta.numero_aditivo) FILTER (WHERE ta.ativo = TRUE) OVER () AS max_numero_ativo,
+                    MAX(ta.numero_aditivo) FILTER (
+                        WHERE ta.ativo = TRUE 
+                          AND ta.tipo_id IN (1, 3)
+                          AND (ta.data_inicio IS NULL OR ta.data_inicio <= CURRENT_DATE)
+                          AND (ta.nova_data_fim IS NULL OR ta.nova_data_fim >= CURRENT_DATE)
+                    ) OVER () AS max_numero_prazo_presente,
                     ci.data_fim AS contrato_data_fim,
                     ci.status_nome AS contrato_status
                 FROM termo_aditivo ta
@@ -84,9 +99,19 @@ class TermoAditivoRepository:
                 SELECT id,
                     CASE
                         WHEN ativo = FALSE THEN 'Inativo'
-                        WHEN contrato_status = 'Encerrado' OR (contrato_data_fim IS NOT NULL AND contrato_data_fim < CURRENT_DATE) THEN 'Vencido'
-                        WHEN max_numero_ativo IS NOT NULL AND numero_aditivo = max_numero_ativo THEN 'Ativo'
-                        ELSE 'Inativo'
+                        WHEN tipo_id IN (1, 3) THEN
+                            CASE
+                                WHEN nova_data_fim IS NOT NULL AND nova_data_fim < CURRENT_DATE THEN 'Vencido'
+                                WHEN data_inicio IS NOT NULL AND data_inicio > CURRENT_DATE THEN 'Aguardando Vigência'
+                                WHEN max_numero_prazo_presente IS NOT NULL AND numero_aditivo = max_numero_prazo_presente THEN 'Ativo'
+                                ELSE 'Vencido'
+                            END
+                        WHEN tipo_id IN (2, 4) THEN
+                            CASE
+                                WHEN contrato_status = 'Encerrado' OR (contrato_data_fim IS NOT NULL AND contrato_data_fim < CURRENT_DATE) THEN 'Vencido'
+                                ELSE 'Ativo'
+                            END
+                        ELSE 'Ativo'
                     END AS novo_status
                 FROM aditivos_calc
             )
@@ -102,9 +127,9 @@ class TermoAditivoRepository:
     async def sincronizar_status_todos_aditivos(self) -> List[int]:
         """
         Rotina diária executada pelo Robô/Scheduler para todos os contratos ativos do sistema.
-        Aplica a regra unificada:
-        - Se contrato Encerrado ou vencido: todos os termos aditivos ativos viram 'Vencido'.
-        - Se contrato vigente: apenas o último aditivo ativo de cada contrato vira 'Ativo', antecessores viram 'Inativo'.
+        Aplica a regra unificada conforme a Lei 14.133/2021:
+        - Prazo/Misto: 'Aguardando Vigência' se data_inicio futura, 'Vencido' se expirado, 'Ativo' se vigente no presente.
+        - Valor/Outros: 'Ativo' enquanto o contrato estiver vigente (suporta múltiplos aditivos de valor), 'Vencido' quando o contrato encerrar.
         """
         rows = await self.conn.fetch(
             """
@@ -113,8 +138,16 @@ class TermoAditivoRepository:
                     ta.id,
                     ta.contrato_id,
                     ta.numero_aditivo,
+                    ta.tipo_id,
+                    ta.data_inicio,
+                    ta.nova_data_fim,
                     ta.ativo,
-                    MAX(ta.numero_aditivo) FILTER (WHERE ta.ativo = TRUE) OVER (PARTITION BY ta.contrato_id) AS max_numero_ativo,
+                    MAX(ta.numero_aditivo) FILTER (
+                        WHERE ta.ativo = TRUE 
+                          AND ta.tipo_id IN (1, 3)
+                          AND (ta.data_inicio IS NULL OR ta.data_inicio <= CURRENT_DATE)
+                          AND (ta.nova_data_fim IS NULL OR ta.nova_data_fim >= CURRENT_DATE)
+                    ) OVER (PARTITION BY ta.contrato_id) AS max_numero_prazo_presente,
                     c.data_fim AS contrato_data_fim,
                     s.nome AS contrato_status
                 FROM termo_aditivo ta
@@ -125,9 +158,19 @@ class TermoAditivoRepository:
                 SELECT id,
                     CASE
                         WHEN ativo = FALSE THEN 'Inativo'
-                        WHEN contrato_status = 'Encerrado' OR (contrato_data_fim IS NOT NULL AND contrato_data_fim < CURRENT_DATE) THEN 'Vencido'
-                        WHEN max_numero_ativo IS NOT NULL AND numero_aditivo = max_numero_ativo THEN 'Ativo'
-                        ELSE 'Inativo'
+                        WHEN tipo_id IN (1, 3) THEN
+                            CASE
+                                WHEN nova_data_fim IS NOT NULL AND nova_data_fim < CURRENT_DATE THEN 'Vencido'
+                                WHEN data_inicio IS NOT NULL AND data_inicio > CURRENT_DATE THEN 'Aguardando Vigência'
+                                WHEN max_numero_prazo_presente IS NOT NULL AND numero_aditivo = max_numero_prazo_presente THEN 'Ativo'
+                                ELSE 'Vencido'
+                            END
+                        WHEN tipo_id IN (2, 4) THEN
+                            CASE
+                                WHEN contrato_status = 'Encerrado' OR (contrato_data_fim IS NOT NULL AND contrato_data_fim < CURRENT_DATE) THEN 'Vencido'
+                                ELSE 'Ativo'
+                            END
+                        ELSE 'Ativo'
                     END AS status_calculado
                 FROM aditivos_calc
             )
@@ -282,7 +325,7 @@ class TermoAditivoRepository:
                 params.append(f"%{filters['tipo']}%")
                 idx += 1
             status_calc = filters.get('status_calc')
-            if status_calc in ('Ativo', 'Vencido', 'Inativo'):
+            if status_calc in ('Ativo', 'Vencido', 'Inativo', 'Aguardando Vigência'):
                 where_clauses.append(f"ta.status = ${idx}")
                 params.append(status_calc)
                 idx += 1

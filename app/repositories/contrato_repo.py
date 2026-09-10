@@ -368,133 +368,205 @@ class ContratoRepository:
 
     async def sincronizar_vigencia_contrato(self, contrato_id: int) -> None:
         """
-        Recalcula contrato.data_inicio e contrato.data_fim a partir do termo aditivo
-        de Prazo/Misto (ativo = TRUE) de MAIOR NÚMERO (o mais recente).
-        Também sincroniza o valor_global consolidando todos os aditivos de Valor/Misto com ativo = TRUE.
+        Recalcula contrato.data_inicio, contrato.data_fim e contrato.status_id
+        conforme as regras da Lei 14.133/2021:
+        1. Preserva permanentemente data_inicio_original e data_fim_original.
+        2. Determina a vigência mandatória:
+           - Aditivo de Prazo/Misto em vigor hoje rege o contrato.
+           - Se o contrato estava Encerrado e recebeu aditivo estendendo a vigência, reativa o contrato para Ativo.
+           - Se há aditivo futuro e o contrato já tem vigência corrente, mantém a vigência corrente até a virada.
+           - Se todos venceram, status vira Encerrado e data_fim é a do último aditivo.
+           - Se não há aditivos de prazo com ativo=TRUE, regride para as datas originais.
+        3. Sincroniza cumulativamente o valor_global consolidando todos os aditivos financeiros (ativo = TRUE).
         """
+        # Preserva datas originais se ainda não preenchidas
+        await self.conn.execute(
+            """
+            UPDATE contrato
+            SET 
+                data_inicio_original = COALESCE(data_inicio_original, data_inicio),
+                data_fim_original = COALESCE(data_fim_original, data_fim)
+            WHERE id = $1 
+              AND (data_inicio_original IS NULL OR data_fim_original IS NULL)
+              AND EXISTS (
+                  SELECT 1 FROM termo_aditivo 
+                  WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
+              )
+            """,
+            contrato_id
+        )
+
         query_vigencia = """
-            WITH vigencia AS (
-                SELECT
-                    c.data_inicio AS data_inicio_atual,
-                    c.data_fim AS data_fim_atual,
-                    s.nome AS status_atual,
-                    COALESCE(
-                        (SELECT data_inicio FROM termo_aditivo
-                         WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
-                           AND data_inicio IS NOT NULL
-                         ORDER BY numero_aditivo DESC LIMIT 1),
-                        c.data_inicio_original
-                    ) AS data_inicio_calculada,
-                    COALESCE(
-                        (SELECT nova_data_fim FROM termo_aditivo
-                         WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
-                           AND nova_data_fim IS NOT NULL
-                         ORDER BY numero_aditivo DESC LIMIT 1),
-                        c.data_fim_original
-                    ) AS data_fim_calculada
+            WITH contrato_atual AS (
+                SELECT 
+                    c.id,
+                    c.data_inicio,
+                    c.data_fim,
+                    c.data_inicio_original,
+                    c.data_fim_original,
+                    s.nome AS status_atual
                 FROM contrato c
                 JOIN status s ON s.id = c.status_id
                 WHERE c.id = $1
+            ),
+            aditivos_prazo AS (
+                SELECT 
+                    id,
+                    numero_aditivo,
+                    data_inicio,
+                    nova_data_fim,
+                    (data_inicio IS NULL OR data_inicio <= CURRENT_DATE) AS ja_iniciou,
+                    (nova_data_fim IS NULL OR nova_data_fim >= CURRENT_DATE) AS nao_expirou
+                FROM termo_aditivo
+                WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (1, 3)
+            ),
+            calculo_vigencia AS (
+                SELECT
+                    ca.id,
+                    ca.status_atual,
+                    COALESCE(
+                        (SELECT data_inicio FROM aditivos_prazo WHERE ja_iniciou AND nao_expirou ORDER BY numero_aditivo DESC LIMIT 1),
+                        CASE WHEN (ca.status_atual = 'Encerrado' OR ca.data_fim < CURRENT_DATE)
+                             THEN (SELECT data_inicio FROM aditivos_prazo WHERE nao_expirou ORDER BY numero_aditivo DESC LIMIT 1)
+                             ELSE NULL
+                        END,
+                        (SELECT data_inicio FROM aditivos_prazo ORDER BY numero_aditivo DESC LIMIT 1),
+                        ca.data_inicio_original,
+                        ca.data_inicio
+                    ) AS nova_data_inicio,
+                    COALESCE(
+                        (SELECT nova_data_fim FROM aditivos_prazo WHERE ja_iniciou AND nao_expirou ORDER BY numero_aditivo DESC LIMIT 1),
+                        CASE WHEN (ca.status_atual = 'Encerrado' OR ca.data_fim < CURRENT_DATE)
+                             THEN (SELECT nova_data_fim FROM aditivos_prazo WHERE nao_expirou ORDER BY numero_aditivo DESC LIMIT 1)
+                             ELSE NULL
+                        END,
+                        CASE WHEN ca.data_fim >= CURRENT_DATE THEN ca.data_fim ELSE NULL END,
+                        (SELECT nova_data_fim FROM aditivos_prazo ORDER BY numero_aditivo DESC LIMIT 1),
+                        ca.data_fim_original,
+                        ca.data_fim
+                    ) AS nova_data_fim
+                FROM contrato_atual ca
             )
             UPDATE contrato c
             SET
-                data_inicio = COALESCE(v.data_inicio_calculada, c.data_inicio),
-                data_fim = v.data_fim_calculada,
+                data_inicio = cv.nova_data_inicio,
+                data_fim = cv.nova_data_fim,
                 status_id = CASE
-                    WHEN v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE
+                    WHEN cv.status_atual IN ('Ativo', 'Encerrado') AND cv.nova_data_fim IS NOT NULL AND cv.nova_data_fim < CURRENT_DATE
                         THEN (SELECT id FROM status WHERE nome = 'Encerrado')
-                    WHEN v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE
+                    WHEN cv.status_atual IN ('Ativo', 'Encerrado') AND cv.nova_data_fim IS NOT NULL AND cv.nova_data_fim >= CURRENT_DATE
                         THEN (SELECT id FROM status WHERE nome = 'Ativo')
                     ELSE c.status_id
                 END,
                 updated_at = NOW()
-            FROM vigencia v
-            WHERE c.id = $1
+            FROM calculo_vigencia cv
+            WHERE c.id = cv.id
               AND (
-                    (v.data_inicio_calculada IS NOT NULL AND v.data_inicio_calculada IS DISTINCT FROM v.data_inicio_atual)
-                 OR (v.data_fim_calculada IS NOT NULL AND v.data_fim_calculada IS DISTINCT FROM v.data_fim_atual)
-                 OR (v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE)
-                 OR (v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE)
+                    c.data_inicio IS DISTINCT FROM cv.nova_data_inicio
+                 OR c.data_fim IS DISTINCT FROM cv.nova_data_fim
+                 OR (cv.status_atual = 'Ativo' AND cv.nova_data_fim < CURRENT_DATE)
+                 OR (cv.status_atual = 'Encerrado' AND cv.nova_data_fim >= CURRENT_DATE)
               )
         """
         await self.conn.execute(query_vigencia, contrato_id)
 
-        # Sincroniza valor financeiro com todos os aditivos financeiros com ativo = TRUE
+        # Sincroniza valor financeiro cumulativo com todos os aditivos financeiros (ativo = TRUE)
         query_valor = """
             WITH totais AS (
                 SELECT 
                     COALESCE(SUM(valor_acrescimo), 0.0) AS soma_acrescimo,
-                    COALESCE(SUM(valor_supressao), 0.0) AS soma_supressao
+                    COALESCE(SUM(valor_supressao), 0.0) AS soma_supressao,
+                    COUNT(*) AS qtd_ativos
                 FROM termo_aditivo
                 WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (2, 3)
             )
             UPDATE contrato c
             SET 
-                valor_global = COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao,
+                valor_global = CASE 
+                    WHEN t.qtd_ativos > 0 THEN COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao
+                    ELSE COALESCE(c.valor_anual, c.valor_global)
+                END,
                 updated_at = NOW()
             FROM totais t
-            WHERE c.id = $1 AND (t.soma_acrescimo > 0 OR t.soma_supressao > 0)
+            WHERE c.id = $1
         """
         await self.conn.execute(query_valor, contrato_id)
 
     async def sincronizar_status_vencimento_geral(self) -> List[Dict]:
         """
         Varre TODOS os contratos ativos e recalcula vigência, valor e status em lote:
-        1. data_inicio = data_inicio do aditivo de Prazo/Misto mais recente com data_inicio (ou data_inicio_original).
-        2. data_fim = nova_data_fim do aditivo de Prazo/Misto de maior número (ou data_fim_original).
-        3. status = Encerrado se vencido, Ativo se não (respeita Suspenso e Cancelado).
-        4. valor_global sincronizado com todos os aditivos financeiros (ativo = TRUE).
+        1. Respeita efeitos prospectivos de aditivos futuros.
+        2. Reativa contratos que tiveram prorrogação pactuada.
+        3. Encerrados se vencidos, Ativo se vigentes (respeita Suspenso e Cancelado).
+        4. Sincroniza cumulativamente valor_global com todos os aditivos financeiros (ativo = TRUE).
         """
         query = """
-            WITH vigencia_calculada AS (
+            WITH aditivos_prazo AS (
+                SELECT 
+                    contrato_id,
+                    id,
+                    numero_aditivo,
+                    data_inicio,
+                    nova_data_fim,
+                    (data_inicio IS NULL OR data_inicio <= CURRENT_DATE) AS ja_iniciou,
+                    (nova_data_fim IS NULL OR nova_data_fim >= CURRENT_DATE) AS nao_expirou
+                FROM termo_aditivo
+                WHERE ativo = TRUE AND tipo_id IN (1, 3)
+            ),
+            calculo_vigencia AS (
                 SELECT
                     c.id AS contrato_id,
-                    c.data_inicio AS data_inicio_atual,
-                    c.data_fim AS data_fim_atual,
                     s.nome AS status_atual,
                     COALESCE(
-                        (SELECT ta.data_inicio FROM termo_aditivo ta
-                         WHERE ta.contrato_id = c.id AND ta.ativo = TRUE
-                           AND ta.tipo_id IN (1, 3) AND ta.data_inicio IS NOT NULL
-                         ORDER BY ta.numero_aditivo DESC LIMIT 1),
-                        c.data_inicio_original
-                    ) AS data_inicio_calculada,
+                        (SELECT ap.data_inicio FROM aditivos_prazo ap WHERE ap.contrato_id = c.id AND ap.ja_iniciou AND ap.nao_expirou ORDER BY ap.numero_aditivo DESC LIMIT 1),
+                        CASE WHEN (s.nome = 'Encerrado' OR c.data_fim < CURRENT_DATE)
+                             THEN (SELECT ap.data_inicio FROM aditivos_prazo ap WHERE ap.contrato_id = c.id AND ap.nao_expirou ORDER BY ap.numero_aditivo DESC LIMIT 1)
+                             ELSE NULL
+                        END,
+                        (SELECT ap.data_inicio FROM aditivos_prazo ap WHERE ap.contrato_id = c.id ORDER BY ap.numero_aditivo DESC LIMIT 1),
+                        c.data_inicio_original,
+                        c.data_inicio
+                    ) AS nova_data_inicio,
                     COALESCE(
-                        (SELECT ta.nova_data_fim FROM termo_aditivo ta
-                         WHERE ta.contrato_id = c.id AND ta.ativo = TRUE
-                           AND ta.tipo_id IN (1, 3) AND ta.nova_data_fim IS NOT NULL
-                         ORDER BY ta.numero_aditivo DESC LIMIT 1),
-                        c.data_fim_original
-                    ) AS data_fim_calculada
+                        (SELECT ap.nova_data_fim FROM aditivos_prazo ap WHERE ap.contrato_id = c.id AND ap.ja_iniciou AND ap.nao_expirou ORDER BY ap.numero_aditivo DESC LIMIT 1),
+                        CASE WHEN (s.nome = 'Encerrado' OR c.data_fim < CURRENT_DATE)
+                             THEN (SELECT ap.nova_data_fim FROM aditivos_prazo ap WHERE ap.contrato_id = c.id AND ap.nao_expirou ORDER BY ap.numero_aditivo DESC LIMIT 1)
+                             ELSE NULL
+                        END,
+                        CASE WHEN c.data_fim >= CURRENT_DATE THEN c.data_fim ELSE NULL END,
+                        (SELECT ap.nova_data_fim FROM aditivos_prazo ap WHERE ap.contrato_id = c.id ORDER BY ap.numero_aditivo DESC LIMIT 1),
+                        c.data_fim_original,
+                        c.data_fim
+                    ) AS nova_data_fim
                 FROM contrato c
                 JOIN status s ON s.id = c.status_id
                 WHERE c.ativo = TRUE
             )
             UPDATE contrato c
             SET
-                data_inicio = COALESCE(v.data_inicio_calculada, c.data_inicio),
-                data_fim = v.data_fim_calculada,
+                data_inicio = cv.nova_data_inicio,
+                data_fim = cv.nova_data_fim,
                 status_id = CASE
-                    WHEN v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE
+                    WHEN cv.status_atual IN ('Ativo', 'Encerrado') AND cv.nova_data_fim IS NOT NULL AND cv.nova_data_fim < CURRENT_DATE
                         THEN (SELECT id FROM status WHERE nome = 'Encerrado')
-                    WHEN v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE
+                    WHEN cv.status_atual IN ('Ativo', 'Encerrado') AND cv.nova_data_fim IS NOT NULL AND cv.nova_data_fim >= CURRENT_DATE
                         THEN (SELECT id FROM status WHERE nome = 'Ativo')
                     ELSE c.status_id
                 END,
                 updated_at = NOW()
-            FROM vigencia_calculada v
-            WHERE c.id = v.contrato_id
+            FROM calculo_vigencia cv
+            WHERE c.id = cv.contrato_id
               AND (
-                    (v.data_inicio_calculada IS NOT NULL AND v.data_inicio_calculada IS DISTINCT FROM v.data_inicio_atual)
-                 OR (v.data_fim_calculada IS NOT NULL AND v.data_fim_calculada IS DISTINCT FROM v.data_fim_atual)
-                 OR (v.status_atual = 'Ativo' AND v.data_fim_calculada < CURRENT_DATE)
-                 OR (v.status_atual = 'Encerrado' AND v.data_fim_calculada >= CURRENT_DATE)
+                    c.data_inicio IS DISTINCT FROM cv.nova_data_inicio
+                 OR c.data_fim IS DISTINCT FROM cv.nova_data_fim
+                 OR (cv.status_atual = 'Ativo' AND cv.nova_data_fim < CURRENT_DATE)
+                 OR (cv.status_atual = 'Encerrado' AND cv.nova_data_fim >= CURRENT_DATE)
               )
             RETURNING c.id, c.nr_contrato
         """
         rows = await self.conn.fetch(query)
 
-        # Sincronização geral de valor financeiro
+        # Sincronização geral cumulativa de valor financeiro
         await self.conn.execute(
             """
             WITH totais_por_contrato AS (
@@ -511,7 +583,7 @@ class ContratoRepository:
                 valor_global = COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao,
                 updated_at = NOW()
             FROM totais_por_contrato t
-            WHERE c.id = t.contrato_id AND (t.soma_acrescimo > 0 OR t.soma_supressao > 0)
+            WHERE c.id = t.contrato_id
             """
         )
 

@@ -386,14 +386,15 @@ Os termos aditivos seguem regras estritas para preservar a segurança jurídica 
    - Ao cadastrar o primeiro aditivo de Prazo ou Misto, as datas originais do contrato são gravadas de forma permanente e imutável nas colunas `data_inicio_original` e `data_fim_original`.
    - As colunas `data_inicio` e `data_fim` do contrato são atualizadas para refletir a vigência ativa do aditivo.
 
-3. **Coexistência de Status**:
-   - Quando um novo aditivo de Prazo entra em vigor com status `Ativo`, ele substitui a vigência de aditivos de prazo anteriores.
-   - O cadastro subsequente de um aditivo de **Valor** NÃO inativa o aditivo de **Prazo** vigente, pois a prorrogação temporal continua em vigor. Ambos coexistem como `Ativo`.
-   - Se o término da vigência estipulado pelo aditivo expirar, o robô de sincronização atualiza o status para `Vencido`.
+3. **Máquina de Estados e Coexistência de Status (Lei 14.133/2021 e TCU)**:
+   - **Efeito Prospectivo (`Aguardando Vigência`)**: Quando um termo aditivo de Prazo ou Misto possui `data_inicio > data atual`, seu status inicial é gravado como `Aguardando Vigência`, e a vigência do contrato não é antecipada até a virada da data (executada pelo robô diário de sincronização).
+   - **Histórico e Auditabilidade (`Vencido`)**: Aditivos cuja vigência estipulada já expirou (`nova_data_fim < data atual`) permanecem perenemente como `Vencido`, servindo como registro probatório auditável do período em que vigoraram.
+   - **Reativação de Contratos Encerrados**: O aditamento de prazo para contrato com vigência expirada atualiza a `data_fim` e reativa automaticamente o status do contrato para `Ativo`. O sistema valida e audita a tempestividade em conformidade à **Súmula 282 do TCU** (`data_assinatura <= data_fim_anterior`).
+   - **Cumulatividade e Coexistência de Aditivos de Valor**: Múltiplos aditivos de Valor (ou Misto) permanecem como `Ativo` simultaneamente. O `valor_global` do contrato acumula algebricamente os aditivos vigentes; a inativação ou exclusão de um aditivo estorna exclusivamente a sua parcela, preservando os demais.
 
 4. **Impacto Financeiro no Valor Global**:
-   - Para termos de Valor e Misto, o campo `valor_aditivo` (positivo ou negativo) é somado ao `valor_global` do contrato.
-   - Em caso de cancelamento ou exclusão do termo aditivo, o montante correspondente é devidamente estornado do contrato.
+   - Para termos de Valor e Misto, os campos de acréscimo e supressão são consolidados ao `valor_global` do contrato.
+   - Em caso de inativação ou exclusão do termo aditivo, o montante correspondente é devidamente estornado, mantendo o histórico orçamentário íntegro.
 
 ---
 
