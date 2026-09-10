@@ -66,6 +66,19 @@ class TermoAditivoService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Termos aditivos de Prazo ou Misto exigem a definição de 'nova_data_fim'."
                 )
+            if dados.nova_data_fim < dados.data_inicio:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Nova data fim não pode ser anterior à nova data de início."
+                )
+            # Validação: vigência não pode ser idêntica à original
+            orig_inicio = contrato.get("data_inicio_original") or contrato.get("data_inicio")
+            orig_fim = contrato.get("data_fim_original") or contrato.get("data_fim")
+            if dados.data_inicio == orig_inicio and dados.nova_data_fim == orig_fim:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A vigência do termo aditivo não pode ser idêntica à vigência original do contrato."
+                )
         else:  # Valor ou Outros obedecem à vigência corrente do contrato
             dados.data_inicio = None
             dados.nova_data_fim = contrato.get("data_fim")
@@ -120,14 +133,10 @@ class TermoAditivoService:
 
     async def atualizar(self, contrato_id: int, aditivo_id: int, dados: TermoAditivoUpdate) -> TermoAditivo:
         contrato = await self._verificar_contrato(contrato_id)
-        await self.buscar_por_id(contrato_id, aditivo_id)
+        aditivo_atual = await self.buscar_por_id(contrato_id, aditivo_id)
         if dados.tipo_id is not None:
             await self._validar_tipo(dados.tipo_id)
-            if dados.tipo_id in [1, 3]:
-                if dados.data_inicio is None:
-                    # Manter ou validar se presente
-                    pass
-            else:
+            if dados.tipo_id not in [1, 3]:
                 dados.data_inicio = None
                 dados.nova_data_fim = contrato.get("data_fim")
 
@@ -137,6 +146,23 @@ class TermoAditivoService:
             elif dados.tipo_id == 4:
                 dados.valor_acrescimo = None
                 dados.valor_supressao = None
+
+        tipo_efetivo = dados.tipo_id if dados.tipo_id is not None else (aditivo_atual.tipo_id or (1 if aditivo_atual.tipo == 'Prazo' else 3 if aditivo_atual.tipo == 'Misto' else 2))
+        if tipo_efetivo in [1, 3]:
+            novo_inicio = dados.data_inicio if dados.data_inicio is not None else aditivo_atual.data_inicio
+            novo_fim = dados.nova_data_fim if dados.nova_data_fim is not None else aditivo_atual.nova_data_fim
+            if novo_inicio and novo_fim and novo_fim < novo_inicio:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Nova data fim não pode ser anterior à nova data de início."
+                )
+            orig_inicio = contrato.get("data_inicio_original") or contrato.get("data_inicio")
+            orig_fim = contrato.get("data_fim_original") or contrato.get("data_fim")
+            if novo_inicio and novo_fim and novo_inicio == orig_inicio and novo_fim == orig_fim:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A vigência do termo aditivo não pode ser idêntica à vigência original do contrato."
+                )
 
         atualizado = await self.repo.update(aditivo_id, dados)
         await self.contrato_repo.sincronizar_vigencia_contrato(contrato_id)

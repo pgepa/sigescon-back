@@ -180,6 +180,31 @@ async def test_regras_vigencia_e_aditivos_lei_14133():
         ad_passado_banco = await termo_aditivo_repo.get_by_id(aditivo_passado.id)
         assert ad_passado_banco['status'] == 'Vencido', f"Esperava Vencido, obteve {ad_passado_banco['status']}"
 
+        # =========================================================================
+        # CENÁRIO D: Tentativa de aditivo com vigência IDÊNTICA à original
+        # Deve lançar HTTPException(400) proibindo aditivo sem alteração real
+        # =========================================================================
+        from fastapi import HTTPException
+        orig_check = await contrato_repo.find_contrato_by_id(contrato_id)
+        orig_inicio = orig_check['data_inicio_original'] or orig_check['data_inicio']
+        orig_fim = orig_check['data_fim_original'] or orig_check['data_fim']
+        
+        with pytest.raises(HTTPException) as exc_info:
+            await service.criar(
+                contrato_id=contrato_id,
+                dados=TermoAditivoCreate(
+                    tipo_id=1,
+                    objeto="Aditivo idêntico à vigência original",
+                    data_assinatura=hoje,
+                    pae="PAE-IDENTICO/2026",
+                    data_publicacao=hoje,
+                    data_inicio=orig_inicio,
+                    nova_data_fim=orig_fim
+                )
+            )
+        assert exc_info.value.status_code == 400
+        assert "A vigência do termo aditivo não pode ser idêntica à vigência original" in exc_info.value.detail
+
     finally:
         await conn.execute("DELETE FROM termo_aditivo WHERE contrato_id = $1", contrato_id)
         await conn.execute("DELETE FROM contrato WHERE id = $1", contrato_id)
