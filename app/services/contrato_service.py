@@ -1,5 +1,7 @@
 # app/services/contrato_service.py
+from __future__ import annotations
 import math
+from datetime import date
 from typing import List, Optional, Dict
 from fastapi import HTTPException, status, UploadFile, Request
 import logging
