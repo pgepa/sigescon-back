@@ -66,7 +66,8 @@ class ContratoRepository:
                 s.nome AS status_nome,
                 gestor.nome AS gestor_nome,
                 fiscal.nome AS fiscal_nome,
-                fiscal_sub.nome AS fiscal_substituto_nome
+                fiscal_sub.nome AS fiscal_substituto_nome,
+                (SELECT COUNT(*) FROM termo_aditivo ta WHERE ta.contrato_id = c.id AND ta.ativo = TRUE) AS total_aditivos
             FROM contrato c
             LEFT JOIN contratado ct ON c.contratado_id = ct.id
             LEFT JOIN modalidade m ON c.modalidade_id = m.id
@@ -309,6 +310,9 @@ class ContratoRepository:
                         )
                         update_data['status_id'] = novo_status_id
 
+            # Remover campos que não são colunas da tabela contrato
+            update_data.pop('justificativa', None)
+
             # Construir UPDATE de forma simples
             set_clauses = []
             values = []
@@ -484,7 +488,7 @@ class ContratoRepository:
             SET 
                 valor_global = CASE 
                     WHEN t.qtd_ativos > 0 THEN COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao
-                    ELSE COALESCE(c.valor_anual, c.valor_global)
+                    ELSE COALESCE(c.valor_global, c.valor_anual)
                 END,
                 updated_at = NOW()
             FROM totais t

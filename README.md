@@ -398,6 +398,34 @@ Os termos aditivos seguem regras estritas para preservar a segurança jurídica 
 
 ---
 
+### Governança Contratual e Edição de Dados (Lei nº 14.133/2021)
+
+O sistema implementa regras estritas de governança para prevenir alterações indevidas em contratos públicos:
+
+1. **Campos Sensíveis (Art. 124 da Lei 14.133/2021)**:
+   - `nr_contrato`, `objeto`, `contratado_id`, `modalidade_id`, `valor_global`, `valor_anual`, `data_inicio` e `data_fim`.
+   - **Bloqueio Obrigatório**: Caso o contrato possua termos aditivos cadastrados (`total_aditivos > 0`), status "Encerrado" ou vigência original expirada, estes campos ficam **estritamente bloqueados** para alteração direta. Qualquer alteração deve ser formalizada através da aba de **Termos Aditivos**.
+   - **Justificativa Obrigatória**: Para contratos ativos sem termos aditivos e com vigência regular, a alteração de qualquer um desses campos exige o preenchimento obrigatório do campo `justificativa` com no mínimo 10 caracteres, ficando registrado em auditoria.
+
+2. **Campos Operacionais e Apostilamento (Arts. 136 e 117 da Lei 14.133/2021)**:
+   - `fiscal_id`, `fiscal_substituto_id`, `gestor_id`, `portaria_fiscal`, `pae`, `doe`, `data_doe`, `garantia`, `nr_adesao_ata`, `termos_contratuais`, `base_legal` e upload de documentos.
+   - **Sempre Editáveis**: Podem ser atualizados a qualquer momento por administradores para refletir alterações procedimentais e de fiscalização, mesmo em contratos com termos aditivos.
+
+3. **Robô Retroativo de Sincronização da Base**:
+   - Assegura o preenchimento de `data_inicio_original` e `data_fim_original` para contratos legados.
+   - Recalcula cumulativamente a vigência, o valor financeiro e os status de todos os contratos e termos aditivos ativos.
+   - Disponível via endpoint administrativo `POST /api/v1/contratos/sincronizar-retroativo` (restrito a Administrador) e via script CLI `python -m app.scripts.sync_retroativo`.
+
+4. **Blindagem Temporal e Prevenção de Conflitos de Datas (Lei 14.133/2021 e Súmula 282/TCU)**:
+   - **Inversão Cronológica**: Bloqueio total se `data_fim < data_inicio` ou se `nova_data_fim <= data_inicio`.
+   - **Tempestividade da Prorrogação**: A formalização deve ocorrer estritamente durante a vigência do contrato (`data_assinatura <= vigencia_atual`). Prorrogação de contrato extinto é vedada (Art. 132 e Súmula 282 do TCU).
+   - **Eficácia da Publicação**: Bloqueio se `data_publicacao < data_assinatura` (Art. 94).
+   - **Extensão Efetiva de Vigência**: Em aditivos de Prazo ou Mistos, a nova data de término deve estender a vigência atual (`nova_data_fim > data_fim_atual`).
+   - **Limite Máximo Decenal**: Validação e bloqueio caso as prorrogações sucessivas ultrapassem 10 anos contados do início original (`nova_data_fim - data_inicio_original <= 10 anos / 3.653 dias`), em respeito aos Arts. 106 e 107.
+   - **Início do Aditivo**: Não é permitido termo aditivo com data de início anterior à celebração do contrato original.
+
+---
+
 ### Múltiplos Perfis e Isolamento de Dados
 
 O SIGESCON implementa o conceito de múltiplos papéis por usuário:

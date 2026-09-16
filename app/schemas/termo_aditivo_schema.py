@@ -1,5 +1,4 @@
-# app/schemas/termo_aditivo_schema.py
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import date, datetime
 
@@ -40,6 +39,14 @@ class TermoAditivoBase(BaseModel):
 class TermoAditivoCreate(TermoAditivoBase):
     numero_aditivo: Optional[int] = None  # Se omitido, calcula automaticamente
 
+    @model_validator(mode="after")
+    def validate_datas(self) -> "TermoAditivoCreate":
+        if self.data_publicacao and self.data_assinatura and self.data_publicacao < self.data_assinatura:
+            raise ValueError("A data de publicação não pode ser anterior à data de assinatura.")
+        if self.data_inicio and self.nova_data_fim and self.nova_data_fim <= self.data_inicio:
+            raise ValueError("A nova data fim deve ser posterior à data de início do aditivo.")
+        return self
+
 
 class TermoAditivoUpdate(BaseModel):
     tipo_id: Optional[int] = None
@@ -61,6 +68,14 @@ class TermoAditivoUpdate(BaseModel):
         if v is not None and v < 0:
             raise ValueError("Valores não podem ser negativos")
         return v
+
+    @model_validator(mode="after")
+    def validate_datas_update(self) -> "TermoAditivoUpdate":
+        if self.data_publicacao and self.data_assinatura and self.data_publicacao < self.data_assinatura:
+            raise ValueError("A data de publicação não pode ser anterior à data de assinatura.")
+        if self.data_inicio and self.nova_data_fim and self.nova_data_fim <= self.data_inicio:
+            raise ValueError("A nova data fim deve ser posterior à data de início do aditivo.")
+        return self
 
 
 class TermoAditivo(TermoAditivoBase):

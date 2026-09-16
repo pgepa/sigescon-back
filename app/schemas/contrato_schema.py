@@ -1,5 +1,4 @@
-# app/schemas/contrato_schema.py
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import date
 
@@ -53,12 +52,21 @@ class Contrato(ContratoBase):
     gestor_nome: Optional[str] = None
     fiscal_nome: Optional[str] = None
     fiscal_substituto_nome: Optional[str] = None
+    total_aditivos: Optional[int] = 0
     
     model_config = ConfigDict(from_attributes=True)
 
 # Schema para a criação de um novo contrato 
 class ContratoCreate(ContratoBase):
-    pass
+    @model_validator(mode='after')
+    def validate_datas_create(self) -> 'ContratoCreate':
+        if self.data_inicio and self.data_fim and self.data_fim < self.data_inicio:
+            raise ValueError('A data de fim da vigência não pode ser anterior à data de início.')
+        if self.data_inicio and self.data_fim and (self.data_fim - self.data_inicio).days > 3652:
+            raise ValueError('A vigência contratual inicial não pode ser superior a 10 anos (Arts. 105, 106 e 110 da Lei 14.133/2021).')
+        if self.data_doe and self.data_fim and self.data_doe > self.data_fim:
+            raise ValueError('A data de publicação no DOE não pode ser posterior à data de término da vigência do contrato.')
+        return self
 
 # Schema para atualização
 class ContratoUpdate(BaseModel):
@@ -84,6 +92,7 @@ class ContratoUpdate(BaseModel):
     garantia: Optional[date] = None
     portaria_fiscal: Optional[str] = Field(None, max_length=255)
     nr_adesao_ata: Optional[str] = Field(None, max_length=255)
+    justificativa: Optional[str] = None
 
     @field_validator('valor_anual')
     @classmethod
@@ -98,6 +107,16 @@ class ContratoUpdate(BaseModel):
         if v is not None and v < 0:
             raise ValueError('Valor global não pode ser negativo')
         return v
+
+    @model_validator(mode='after')
+    def validate_datas(self) -> 'ContratoUpdate':
+        if self.data_inicio and self.data_fim and self.data_fim < self.data_inicio:
+            raise ValueError('A data de fim da vigência não pode ser anterior à data de início.')
+        if self.data_inicio and self.data_fim and (self.data_fim - self.data_inicio).days > 3652:
+            raise ValueError('A vigência contratual não pode ser superior a 10 anos (Arts. 105, 106 e 110 da Lei 14.133/2021).')
+        if self.data_doe and self.data_fim and self.data_doe > self.data_fim:
+            raise ValueError('A data de publicação no DOE não pode ser posterior à data de término da vigência do contrato.')
+        return self
 
 # Schema para a resposta da listagem
 class ContratoList(BaseModel):
