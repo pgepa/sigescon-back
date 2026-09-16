@@ -294,6 +294,112 @@ class ContratoService:
             if not existing_contrato:
                 return None
 
+            # Detectar quais campos sensíveis foram alterados
+            campos_sensiveis = [
+                'nr_contrato', 'objeto', 'contratado_id', 'modalidade_id',
+                'valor_global', 'valor_anual', 'data_inicio', 'data_fim'
+            ]
+            
+            campos_sensiveis_alterados = []
+            for campo in campos_sensiveis:
+                valor_novo = getattr(contrato_update, campo, None)
+                if valor_novo is not None:
+                    valor_antigo = existing_contrato.get(campo)
+                    # Normalizar tipos para comparação segura
+                    if campo in ('valor_global', 'valor_anual'):
+                        val_antigo_float = float(valor_antigo) if valor_antigo is not None else None
+                        val_novo_float = float(valor_novo) if valor_novo is not None else None
+                        if val_antigo_float != val_novo_float:
+                            campos_sensiveis_alterados.append(campo)
+                    elif campo in ('data_inicio', 'data_fim'):
+                        d_antiga = str(valor_antigo) if valor_antigo is not None else None
+                        d_nova = str(valor_novo) if valor_novo is not None else None
+                        if d_antiga != d_nova:
+                            campos_sensiveis_alterados.append(campo)
+                    else:
+                        if str(valor_antigo) != str(valor_novo):
+                            campos_sensiveis_alterados.append(campo)
+
+            # Se houver tentativa de alteração de campos sensíveis, aplicar as travas da Lei 14.133
+            if campos_sensiveis_alterados:
+                # 1. Trava: contrato possui termos aditivos
+                total_aditivos = await self.contrato_repo.conn.fetchval(
+                    "SELECT COUNT(*) FROM termo_aditivo WHERE contrato_id = $1 AND ativo = TRUE",
+                    contrato_id
+                )
+                if total_aditivos and total_aditivos > 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Este contrato possui {total_aditivos} termo(s) aditivo(s) cadastrado(s). "
+                            "Seus campos sensíveis (vigência, valor, número, objeto, contratado ou modalidade) "
+                            "não podem ser alterados diretamente no contrato. "
+                            "Quaisquer alterações desses campos devem ser realizadas formalmente via Termo Aditivo."
+                        )
+                    )
+
+                # 2. Trava: contrato com status Encerrado
+                status_nome = existing_contrato.get('status_nome')
+                if status_nome == 'Encerrado':
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "Não é permitido alterar campos sensíveis de um contrato com status 'Encerrado'. "
+                            "Caso necessite prorrogar ou alterar o contrato, inclua um Termo Aditivo."
+                        )
+                    )
+
+                # 3. Trava: vigência original expirada
+                from datetime import date
+                today = date.today()
+                data_fim_original = existing_contrato.get('data_fim_original') or existing_contrato.get('data_fim')
+                if data_fim_original and data_fim_original < today:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "A vigência original deste contrato já expirou. "
+                            "Não é permitido alterar campos sensíveis diretamente no contrato. "
+                            "Para alterar prazos ou valores, inclua um Termo Aditivo."
+                        )
+                    )
+
+                # 4. Trava: justificativa obrigatória
+                justificativa = contrato_update.justificativa
+                if not justificativa or len(justificativa.strip()) < 10:
+                    nomes_amigaveis = {
+                        'nr_contrato': 'Número do Contrato',
+                        'objeto': 'Objeto',
+                        'contratado_id': 'Contratado',
+                        'modalidade_id': 'Modalidade',
+                        'valor_global': 'Valor Global',
+                        'valor_anual': 'Valor Anual',
+                        'data_inicio': 'Data de Início',
+                        'data_fim': 'Data de Fim'
+                    }
+                    campos_formatados = [nomes_amigaveis.get(c, c) for c in campos_sensiveis_alterados]
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"A alteração dos campos sensíveis ({', '.join(campos_formatados)}) "
+                            "exige o preenchimento de uma justificativa formal com no mínimo 10 caracteres."
+                        )
+                    )
+
+            # Validação temporal cruzada com dados existentes
+            data_ini_efetiva = contrato_update.data_inicio or existing_contrato.get('data_inicio')
+            data_fim_efetiva = contrato_update.data_fim or existing_contrato.get('data_fim')
+            if data_ini_efetiva and data_fim_efetiva:
+                if data_fim_efetiva < data_ini_efetiva:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="A data de fim da vigência não pode ser anterior à data de início."
+                    )
+                if (data_fim_efetiva - data_ini_efetiva).days > 3653:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="A vigência contratual não pode ser superior a 10 anos (Arts. 105, 106 e 110 da Lei 14.133/2021)."
+                    )
+
             # Valida chaves estrangeiras antes da atualização
             print(f"\n=== DEBUG - Iniciando validação foreign keys ===")
             await self._validate_foreign_keys(contrato_update)
@@ -401,6 +507,8 @@ class ContratoService:
                         dados_novos['data_inicio'] = str(contrato_update.data_inicio)
                     if contrato_update.data_fim is not None:
                         dados_novos['data_fim'] = str(contrato_update.data_fim)
+                    if contrato_update.justificativa is not None:
+                        dados_novos['justificativa'] = contrato_update.justificativa
 
                     await audit_atualizar_contrato(
                         conn=self.contrato_repo.conn,
@@ -417,6 +525,8 @@ class ContratoService:
 
             return updated_contrato
             
+        except HTTPException:
+            raise
         except Exception as e:
             logging.error(f"Erro ao atualizar contrato {contrato_id}: {e}")
             raise HTTPException(

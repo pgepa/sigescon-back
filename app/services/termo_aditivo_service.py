@@ -43,6 +43,100 @@ class TermoAditivoService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tipo de termo aditivo inválido")
         return tipo
 
+    def _validar_regras_temporais_14133(
+        self,
+        contrato: dict,
+        dados_tipo_id: int,
+        data_assinatura: Optional[date],
+        data_publicacao: Optional[date],
+        data_inicio: Optional[date],
+        nova_data_fim: Optional[date],
+        is_criacao: bool = True
+    ):
+        """
+        Validações temporais e cronológicas obrigatórias pela Lei 14.133/2021 e Súmula 282 do TCU.
+        """
+        # 1. Cronologia básica: Publicação não pode ser anterior à assinatura (Art. 94 Lei 14.133)
+        if data_publicacao and data_assinatura and data_publicacao < data_assinatura:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A data de publicação não pode ser anterior à data de assinatura."
+            )
+
+        orig_inicio = contrato.get("data_inicio_original") or contrato.get("data_inicio")
+        orig_fim = contrato.get("data_fim_original") or contrato.get("data_fim")
+        data_fim_atual = contrato.get("data_fim")
+
+        # Regras para aditivos de Prazo (1) ou Misto (3)
+        if dados_tipo_id in [1, 3]:
+            if not data_inicio:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Nova data de início é obrigatória para aditivos de Prazo ou Misto."
+                )
+            if not nova_data_fim:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Termos aditivos de Prazo ou Misto exigem a definição de 'nova_data_fim'."
+                )
+
+            # 2. Nova data fim deve ser estritamente posterior à data de início
+            if nova_data_fim <= data_inicio:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A nova data fim deve ser posterior à nova data de início."
+                )
+
+            # 3. Súmula 282 TCU e Art. 132 da Lei 14.133: Formalização tempestiva na vigência
+            if is_criacao and data_assinatura and data_fim_atual and data_assinatura > data_fim_atual:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"A formalização da prorrogação contratual deve ocorrer durante a vigência do contrato "
+                        f"(Art. 132 da Lei 14.133/2021 e Súmula 282 do TCU). "
+                        f"A vigência atual expirou em {data_fim_atual.strftime('%d/%m/%Y')} e a "
+                        f"data de assinatura informada foi {data_assinatura.strftime('%d/%m/%Y')}."
+                    )
+                )
+
+            # 4. Início do aditivo não pode ser anterior ao início original do contrato
+            if orig_inicio and data_inicio < orig_inicio:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"A data de início do termo aditivo ({data_inicio.strftime('%d/%m/%Y')}) não pode "
+                        f"ser anterior à data de início original do contrato ({orig_inicio.strftime('%d/%m/%Y')})."
+                    )
+                )
+
+            # 5. Prorrogação efetiva na criação: nova data fim deve estender a vigência atual
+            if is_criacao and data_fim_atual and nova_data_fim <= data_fim_atual:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Para termos aditivos de Prazo ou Misto, a nova data fim ({nova_data_fim.strftime('%d/%m/%Y')}) "
+                        f"deve ser estritamente posterior à vigência atual do contrato ({data_fim_atual.strftime('%d/%m/%Y')})."
+                    )
+                )
+
+            # 6. Vigência não pode ser idêntica à original
+            if orig_inicio and orig_fim and data_inicio == orig_inicio and nova_data_fim == orig_fim:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A vigência do termo aditivo não pode ser idêntica à vigência original do contrato."
+                )
+
+            # 7. Limite Máximo Decenal (Arts. 106 e 107 da Lei 14.133/2021)
+            if orig_inicio and (nova_data_fim - orig_inicio).days > 3653:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"A nova vigência solicitada ({nova_data_fim.strftime('%d/%m/%Y')}) extrapola o limite máximo "
+                        f"decenal de 10 anos permitido pelos Arts. 106 e 107 da Lei 14.133/2021 "
+                        f"a contar do início original do contrato ({orig_inicio.strftime('%d/%m/%Y')})."
+                    )
+                )
+
     async def criar(self, contrato_id: int, dados: TermoAditivoCreate) -> TermoAditivo:
         contrato = await self._verificar_contrato(contrato_id)
         await self._validar_tipo(dados.tipo_id)
@@ -57,29 +151,19 @@ class TermoAditivoService:
         if not dados.objeto or not dados.objeto.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Descrição do termo aditivo é obrigatória.")
 
-        # Validações e atribuições por natureza
-        if dados.tipo_id in [1, 3]:  # Prazo ou Misto
-            if not dados.data_inicio:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nova data de início é obrigatória para aditivos de Prazo ou Misto.")
-            if not dados.nova_data_fim:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Termos aditivos de Prazo ou Misto exigem a definição de 'nova_data_fim'."
-                )
-            if dados.nova_data_fim < dados.data_inicio:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Nova data fim não pode ser anterior à nova data de início."
-                )
-            # Validação: vigência não pode ser idêntica à original
-            orig_inicio = contrato.get("data_inicio_original") or contrato.get("data_inicio")
-            orig_fim = contrato.get("data_fim_original") or contrato.get("data_fim")
-            if dados.data_inicio == orig_inicio and dados.nova_data_fim == orig_fim:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="A vigência do termo aditivo não pode ser idêntica à vigência original do contrato."
-                )
-        else:  # Valor ou Outros obedecem à vigência corrente do contrato
+        # Validações temporais da Lei 14.133/2021 e Súmula 282 TCU
+        self._validar_regras_temporais_14133(
+            contrato=contrato,
+            dados_tipo_id=dados.tipo_id,
+            data_assinatura=dados.data_assinatura,
+            data_publicacao=dados.data_publicacao,
+            data_inicio=dados.data_inicio,
+            nova_data_fim=dados.nova_data_fim,
+            is_criacao=True
+        )
+
+        # Atribuições por natureza
+        if dados.tipo_id not in [1, 3]:  # Valor ou Outros obedecem à vigência corrente do contrato
             dados.data_inicio = None
             dados.nova_data_fim = contrato.get("data_fim")
 
@@ -96,23 +180,6 @@ class TermoAditivoService:
         elif dados.tipo_id == 4:
             dados.valor_acrescimo = None
             dados.valor_supressao = None
-
-        # Auditoria Lei 14.133/2021 e Súmula 282 TCU:
-        # Se o contrato estiver Encerrado e receber aditivo de prazo/misto, registrar em auditoria
-        data_fim_anterior = contrato.get("data_fim")
-        if contrato.get("status_id") == 3 or (data_fim_anterior and data_fim_anterior < dados.data_assinatura):
-            if dados.tipo_id in [1, 3]:
-                if data_fim_anterior and dados.data_assinatura > data_fim_anterior:
-                    logger.warning(
-                        f"[AUDITORIA - LEI 14.133/2021] Termo aditivo de prazo cadastrado para contrato {contrato_id} "
-                        f"com data de assinatura ({dados.data_assinatura}) posterior ao término da vigência anterior ({data_fim_anterior}). "
-                        f"Alerta de conformidade com a Súmula 282/TCU."
-                    )
-                else:
-                    logger.info(
-                        f"[AUDITORIA - LEI 14.133/2021] Regularização tempestiva de contrato {contrato_id} anteriormente encerrado "
-                        f"mediante termo aditivo assinado em {dados.data_assinatura} (antes ou no termo da vigência anterior {data_fim_anterior})."
-                    )
 
         novo = await self.repo.create(contrato_id, dados)
         await self.contrato_repo.sincronizar_vigencia_contrato(contrato_id)
@@ -147,22 +214,21 @@ class TermoAditivoService:
                 dados.valor_acrescimo = None
                 dados.valor_supressao = None
 
-        tipo_efetivo = dados.tipo_id if dados.tipo_id is not None else (aditivo_atual.tipo_id or (1 if aditivo_atual.tipo == 'Prazo' else 3 if aditivo_atual.tipo == 'Misto' else 2))
-        if tipo_efetivo in [1, 3]:
-            novo_inicio = dados.data_inicio if dados.data_inicio is not None else aditivo_atual.data_inicio
-            novo_fim = dados.nova_data_fim if dados.nova_data_fim is not None else aditivo_atual.nova_data_fim
-            if novo_inicio and novo_fim and novo_fim < novo_inicio:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Nova data fim não pode ser anterior à nova data de início."
-                )
-            orig_inicio = contrato.get("data_inicio_original") or contrato.get("data_inicio")
-            orig_fim = contrato.get("data_fim_original") or contrato.get("data_fim")
-            if novo_inicio and novo_fim and novo_inicio == orig_inicio and novo_fim == orig_fim:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="A vigência do termo aditivo não pode ser idêntica à vigência original do contrato."
-                )
+        tipo_efetivo = dados.tipo_id if dados.tipo_id is not None else (aditivo_atual.tipo_id or (1 if aditivo_atual.tipo_nome == 'Prazo' else 3 if aditivo_atual.tipo_nome == 'Misto' else 2))
+        data_ass_efetiva = dados.data_assinatura if dados.data_assinatura is not None else aditivo_atual.data_assinatura
+        data_pub_efetiva = dados.data_publicacao if dados.data_publicacao is not None else aditivo_atual.data_publicacao
+        data_ini_efetiva = dados.data_inicio if dados.data_inicio is not None else aditivo_atual.data_inicio
+        data_fim_efetiva = dados.nova_data_fim if dados.nova_data_fim is not None else aditivo_atual.nova_data_fim
+
+        self._validar_regras_temporais_14133(
+            contrato=contrato,
+            dados_tipo_id=tipo_efetivo,
+            data_assinatura=data_ass_efetiva,
+            data_publicacao=data_pub_efetiva,
+            data_inicio=data_ini_efetiva,
+            nova_data_fim=data_fim_efetiva,
+            is_criacao=False
+        )
 
         atualizado = await self.repo.update(aditivo_id, dados)
         await self.contrato_repo.sincronizar_vigencia_contrato(contrato_id)
