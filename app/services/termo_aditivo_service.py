@@ -1,6 +1,8 @@
 # app/services/termo_aditivo_service.py
+from __future__ import annotations
 import logging
-from typing import List, Dict
+from datetime import date
+from typing import List, Dict, Optional
 from fastapi import HTTPException, status, UploadFile
 
 from app.repositories.termo_aditivo_repo import TermoAditivoRepository
