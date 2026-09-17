@@ -85,7 +85,7 @@ async def test_regras_vigencia_e_aditivos_lei_14133():
                 valor_acrescimo=10000.0
             )
         )
-        assert aditivo_val_1.status == 'Ativo'
+        assert aditivo_val_1.status == 'Incorporado'
 
         c_check = await contrato_repo.find_contrato_by_id(contrato_id)
         assert float(c_check['valor_global']) == 110000.0
@@ -101,11 +101,11 @@ async def test_regras_vigencia_e_aditivos_lei_14133():
                 valor_acrescimo=15000.0
             )
         )
-        assert aditivo_val_2.status == 'Ativo'
+        assert aditivo_val_2.status == 'Incorporado'
 
-        # Verifica que o 1º aditivo de valor CONTINUA 'Ativo' (coexistência plena)
+        # Verifica que o 1º aditivo de valor CONTINUA 'Incorporado' (coexistência plena)
         ad_1_banco = await termo_aditivo_repo.get_by_id(aditivo_val_1.id)
-        assert ad_1_banco['status'] == 'Ativo', "O 1º aditivo de valor deve continuar Ativo!"
+        assert ad_1_banco['status'] == 'Incorporado', "O 1º aditivo de valor deve continuar Incorporado!"
 
         c_check = await contrato_repo.find_contrato_by_id(contrato_id)
         assert float(c_check['valor_global']) == 125000.0, f"Esperava 125000, obteve {c_check['valor_global']}"
@@ -118,9 +118,9 @@ async def test_regras_vigencia_e_aditivos_lei_14133():
         assert ad_2_banco['status'] == 'Inativo'
         assert ad_2_banco['ativo'] is False
 
-        # O 1º aditivo de valor permanece Ativo
+        # O 1º aditivo de valor permanece Incorporado
         ad_1_banco = await termo_aditivo_repo.get_by_id(aditivo_val_1.id)
-        assert ad_1_banco['status'] == 'Ativo'
+        assert ad_1_banco['status'] == 'Incorporado'
 
         # O valor_global regrediu para 110.000 (estorno do aditivo 2)
         c_check = await contrato_repo.find_contrato_by_id(contrato_id)
@@ -134,6 +134,14 @@ async def test_regras_vigencia_e_aditivos_lei_14133():
         # =========================================================================
         passado_inicio = hoje - timedelta(days=400)
         passado_fim = hoje - timedelta(days=35)
+        contrato_fim_antigo = passado_inicio + timedelta(days=100)
+        # Ajusta contrato no banco para vigência anterior coerente com o aditivo passado
+        await conn.execute(
+            "UPDATE contrato SET data_inicio_original = $1, data_inicio = $1, data_fim_original = $2, data_fim = $2 WHERE id = $3",
+            passado_inicio - timedelta(days=60),
+            contrato_fim_antigo,
+            contrato_id
+        )
         # Simula um aditivo passado que já venceu
         aditivo_passado = await service.criar(
             contrato_id=contrato_id,
@@ -155,16 +163,17 @@ async def test_regras_vigencia_e_aditivos_lei_14133():
         c_check = await contrato_repo.find_contrato_by_id(contrato_id)
         assert c_check['status_nome'] == 'Encerrado'
 
-        # Agora usuário adiciona um novo aditivo de prazo vigente hoje
+        # Agora usuário adiciona um novo aditivo de prazo formalizado tempestivamente na vigência
         novo_fim = hoje + timedelta(days=200)
+        data_ass_tempestiva = passado_fim - timedelta(days=2)
         aditivo_novo_prazo = await service.criar(
             contrato_id=contrato_id,
             dados=TermoAditivoCreate(
                 tipo_id=1,
                 objeto="Novo aditivo reativando vigência",
-                data_assinatura=hoje,
+                data_assinatura=data_ass_tempestiva,
                 pae="PAE-REATIVACAO/2026",
-                data_publicacao=hoje,
+                data_publicacao=data_ass_tempestiva,
                 data_inicio=hoje,
                 nova_data_fim=novo_fim
             )
@@ -176,9 +185,9 @@ async def test_regras_vigencia_e_aditivos_lei_14133():
         assert c_check['status_nome'] == 'Ativo', f"Esperava Ativo, obteve {c_check['status_nome']}"
         assert c_check['data_fim'] == novo_fim
 
-        # O aditivo antigo DEVE PERMANECER 'Vencido'! (Auditabilidade protegida)
+        # O aditivo antigo foi sucedido por um aditivo posterior, tornando-se 'Inativo' conforme nova regra
         ad_passado_banco = await termo_aditivo_repo.get_by_id(aditivo_passado.id)
-        assert ad_passado_banco['status'] == 'Vencido', f"Esperava Vencido, obteve {ad_passado_banco['status']}"
+        assert ad_passado_banco['status'] == 'Inativo', f"Esperava Inativo, obteve {ad_passado_banco['status']}"
 
         # =========================================================================
         # CENÁRIO D: Tentativa de aditivo com vigência IDÊNTICA à original

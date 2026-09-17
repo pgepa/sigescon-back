@@ -39,6 +39,7 @@ class TermoAditivoRepository:
                 CASE 
                     WHEN $3 IN (1, 3) AND $8::date IS NOT NULL AND $8::date < CURRENT_DATE THEN 'Vencido'
                     WHEN $3 IN (1, 3) AND $7::date IS NOT NULL AND $7::date > CURRENT_DATE THEN 'Aguardando Vigência'
+                    WHEN $3 IN (2, 4) THEN 'Incorporado'
                     ELSE 'Ativo'
                 END,
                 NOW(), NOW()
@@ -56,84 +57,117 @@ class TermoAditivoRepository:
 
     async def _recalcular_status_contrato(self, contrato_id: int) -> None:
         """
-        Recalcula o `status` (Ativo/Aguardando Vigência/Vencido/Inativo) dos termos aditivos do contrato:
-        1. 'Inativo': Registros com ativo = FALSE (excluídos/cancelados).
+        Recalcula o `status` (Ativo/Incorporado/Vencido/Inativo) dos termos aditivos do contrato:
+        1. 'Inativo': Registros com ativo = FALSE (excluídos/cancelados) OU TA de prazo substituído
+           por um novo TA com data_inicio >= sua data_inicio e nova_data_fim diferente.
         2. Aditivos de Prazo/Misto (tipo_id IN (1, 3)):
-           - 'Vencido': Se nova_data_fim < CURRENT_DATE (imutabilidade histórica permanente).
-           - 'Aguardando Vigência': Se data_inicio > CURRENT_DATE (efeito prospectivo/futuro).
-           - 'Ativo': Aditivo de maior número dentro da vigência presente (data_inicio <= CURRENT_DATE AND nova_data_fim >= CURRENT_DATE).
-           - 'Vencido': Aditivos antecessores substituídos pela prorrogação mais recente.
+           - 'Inativo': Se existe outro TA posterior (maior numero_aditivo) ativo de Prazo/Misto
+             com data_inicio >= este.data_inicio e nova_data_fim != este.nova_data_fim.
+           - 'Vencido': Se nova_data_fim < CURRENT_DATE.
+           - 'Ativo': O TA de Prazo/Misto que comanda a vigência atual presente.
+           - 'Vencido': Aditivos anteriores da cadeia de prorrogação que já expiraram.
         3. Aditivos de Valor/Outros (tipo_id IN (2, 4)):
-           - 'Vencido': Se o contrato estiver extinto (status 'Encerrado' ou data_fim < CURRENT_DATE).
-           - 'Ativo': Enquanto o contrato estiver vigente (coexistem múltiplos aditivos de valor cumulativos).
+           - 'Vencido': Se a vigência vinculada expirou (contrato encerrado ou data_fim do ciclo < CURRENT_DATE).
+           - 'Incorporado': Enquanto a vigência vinculada estiver ativa.
         """
         await self.conn.execute(
             """
             WITH contrato_info AS (
                 SELECT c.id, c.data_fim, s.nome AS status_nome
-                FROM contrato c
-                JOIN status s ON s.id = c.status_id
-                WHERE c.id = $1
-            ),
-            aditivos_calc AS (
-                SELECT 
-                    ta.id,
-                    ta.numero_aditivo,
-                    ta.tipo_id,
-                    ta.data_inicio,
-                    ta.nova_data_fim,
-                    ta.ativo,
-                    MAX(ta.numero_aditivo) FILTER (
-                        WHERE ta.ativo = TRUE 
-                          AND ta.tipo_id IN (1, 3)
-                          AND (ta.data_inicio IS NULL OR ta.data_inicio <= CURRENT_DATE)
-                          AND (ta.nova_data_fim IS NULL OR ta.nova_data_fim >= CURRENT_DATE)
-                    ) OVER () AS max_numero_prazo_presente,
-                    ci.data_fim AS contrato_data_fim,
-                    ci.status_nome AS contrato_status
-                FROM termo_aditivo ta
-                CROSS JOIN contrato_info ci
-                WHERE ta.contrato_id = $1
-            ),
-            classificado AS (
-                SELECT id,
-                    CASE
-                        WHEN ativo = FALSE THEN 'Inativo'
-                        WHEN tipo_id IN (1, 3) THEN
-                            CASE
-                                WHEN nova_data_fim IS NOT NULL AND nova_data_fim < CURRENT_DATE THEN 'Vencido'
-                                WHEN data_inicio IS NOT NULL AND data_inicio > CURRENT_DATE THEN 'Aguardando Vigência'
-                                WHEN max_numero_prazo_presente IS NOT NULL AND numero_aditivo = max_numero_prazo_presente THEN 'Ativo'
-                                ELSE 'Vencido'
-                            END
-                        WHEN tipo_id IN (2, 4) THEN
-                            CASE
-                                WHEN contrato_status = 'Encerrado' OR (contrato_data_fim IS NOT NULL AND contrato_data_fim < CURRENT_DATE) THEN 'Vencido'
-                                ELSE 'Ativo'
-                            END
-                        ELSE 'Ativo'
-                    END AS novo_status
-                FROM aditivos_calc
-            )
-            UPDATE termo_aditivo t
-            SET status = c.novo_status, updated_at = NOW()
-            FROM classificado c
-            WHERE t.id = c.id
-              AND t.status IS DISTINCT FROM c.novo_status
-            """,
+            FROM contrato c
+            JOIN status s ON s.id = c.status_id
+            WHERE c.id = $1
+        ),
+        aditivos_prazo_ativos AS (
+            SELECT 
+                ta.id,
+                ta.numero_aditivo,
+                ta.data_inicio,
+                ta.nova_data_fim
+            FROM termo_aditivo ta
+            WHERE ta.contrato_id = $1 
+              AND ta.ativo = TRUE 
+              AND ta.tipo_id IN (1, 3)
+        ),
+        aditivos_calc AS (
+            SELECT 
+                ta.id,
+                ta.numero_aditivo,
+                ta.tipo_id,
+                ta.data_inicio,
+                ta.nova_data_fim,
+                ta.created_at,
+                ta.ativo,
+                MAX(ta.numero_aditivo) FILTER (
+                    WHERE ta.ativo = TRUE 
+                      AND ta.tipo_id IN (1, 3)
+                      AND (ta.data_inicio IS NULL OR ta.data_inicio <= CURRENT_DATE)
+                      AND (ta.nova_data_fim IS NULL OR ta.nova_data_fim >= CURRENT_DATE)
+                ) OVER () AS max_numero_prazo_presente,
+                -- Verifica se este TA de prazo foi substituído por um posterior com data_inicio >= e nova_data_fim diferente
+                EXISTS (
+                    SELECT 1 FROM aditivos_prazo_ativos sub
+                    WHERE sub.numero_aditivo > ta.numero_aditivo
+                      AND sub.data_inicio >= ta.data_inicio
+                      AND (sub.nova_data_fim IS DISTINCT FROM ta.nova_data_fim)
+                ) AS foi_substituido_prazo,
+                ci.data_fim AS contrato_data_fim,
+                ci.status_nome AS contrato_status
+            FROM termo_aditivo ta
+            CROSS JOIN contrato_info ci
+            WHERE ta.contrato_id = $1
+        ),
+        classificado AS (
+            SELECT id,
+                CASE
+                    WHEN ativo = FALSE THEN 'Inativo'
+                    WHEN tipo_id IN (1, 3) THEN
+                        CASE
+                            WHEN foi_substituido_prazo THEN 'Inativo'
+                            WHEN nova_data_fim IS NOT NULL AND nova_data_fim < CURRENT_DATE THEN 'Vencido'
+                            WHEN max_numero_prazo_presente IS NOT NULL AND numero_aditivo = max_numero_prazo_presente THEN 'Ativo'
+                            WHEN data_inicio IS NOT NULL AND data_inicio > CURRENT_DATE THEN 'Aguardando Vigência'
+                            ELSE 'Vencido'
+                        END
+                    WHEN tipo_id IN (2, 4) THEN
+                        CASE
+                            WHEN contrato_status = 'Encerrado' OR (contrato_data_fim IS NOT NULL AND contrato_data_fim < CURRENT_DATE) THEN 'Vencido'
+                            ELSE 'Incorporado'
+                        END
+                    ELSE 'Ativo'
+                END AS novo_status
+            FROM aditivos_calc
+        )
+        UPDATE termo_aditivo t
+        SET status = c.novo_status, updated_at = NOW()
+        FROM classificado c
+        WHERE t.id = c.id
+          AND t.status IS DISTINCT FROM c.novo_status
+        """,
             contrato_id
         )
 
     async def sincronizar_status_todos_aditivos(self) -> List[int]:
         """
-        Rotina diária executada pelo Robô/Scheduler para todos os contratos ativos do sistema.
+        Rotina executada pelo Robô Retroativo e Scheduler Diário para todos os contratos ativos do sistema.
         Aplica a regra unificada conforme a Lei 14.133/2021:
-        - Prazo/Misto: 'Aguardando Vigência' se data_inicio futura, 'Vencido' se expirado, 'Ativo' se vigente no presente.
-        - Valor/Outros: 'Ativo' enquanto o contrato estiver vigente (suporta múltiplos aditivos de valor), 'Vencido' quando o contrato encerrar.
+        - Prazo/Misto: 'Ativo' se comanda a vigência presente, 'Inativo' se substituído por novo TA com data_inicio >= e fim diferente, 'Vencido' se expirado.
+        - Valor/Outros: 'Incorporado' enquanto o contrato/vigência estiver vigente, 'Vencido' quando encerrar.
         """
         rows = await self.conn.fetch(
             """
-            WITH aditivos_calc AS (
+            WITH aditivos_prazo_ativos AS (
+                SELECT 
+                    ta.id,
+                    ta.contrato_id,
+                    ta.numero_aditivo,
+                    ta.data_inicio,
+                    ta.nova_data_fim
+                FROM termo_aditivo ta
+                WHERE ta.ativo = TRUE 
+                  AND ta.tipo_id IN (1, 3)
+            ),
+            aditivos_calc AS (
                 SELECT 
                     ta.id,
                     ta.contrato_id,
@@ -141,6 +175,7 @@ class TermoAditivoRepository:
                     ta.tipo_id,
                     ta.data_inicio,
                     ta.nova_data_fim,
+                    ta.created_at,
                     ta.ativo,
                     MAX(ta.numero_aditivo) FILTER (
                         WHERE ta.ativo = TRUE 
@@ -148,6 +183,13 @@ class TermoAditivoRepository:
                           AND (ta.data_inicio IS NULL OR ta.data_inicio <= CURRENT_DATE)
                           AND (ta.nova_data_fim IS NULL OR ta.nova_data_fim >= CURRENT_DATE)
                     ) OVER (PARTITION BY ta.contrato_id) AS max_numero_prazo_presente,
+                    EXISTS (
+                        SELECT 1 FROM aditivos_prazo_ativos sub
+                        WHERE sub.contrato_id = ta.contrato_id
+                          AND sub.numero_aditivo > ta.numero_aditivo
+                          AND sub.data_inicio >= ta.data_inicio
+                          AND (sub.nova_data_fim IS DISTINCT FROM ta.nova_data_fim)
+                    ) AS foi_substituido_prazo,
                     c.data_fim AS contrato_data_fim,
                     s.nome AS contrato_status
                 FROM termo_aditivo ta
@@ -160,15 +202,16 @@ class TermoAditivoRepository:
                         WHEN ativo = FALSE THEN 'Inativo'
                         WHEN tipo_id IN (1, 3) THEN
                             CASE
+                                WHEN foi_substituido_prazo THEN 'Inativo'
                                 WHEN nova_data_fim IS NOT NULL AND nova_data_fim < CURRENT_DATE THEN 'Vencido'
-                                WHEN data_inicio IS NOT NULL AND data_inicio > CURRENT_DATE THEN 'Aguardando Vigência'
                                 WHEN max_numero_prazo_presente IS NOT NULL AND numero_aditivo = max_numero_prazo_presente THEN 'Ativo'
+                                WHEN data_inicio IS NOT NULL AND data_inicio > CURRENT_DATE THEN 'Aguardando Vigência'
                                 ELSE 'Vencido'
                             END
                         WHEN tipo_id IN (2, 4) THEN
                             CASE
                                 WHEN contrato_status = 'Encerrado' OR (contrato_data_fim IS NOT NULL AND contrato_data_fim < CURRENT_DATE) THEN 'Vencido'
-                                ELSE 'Ativo'
+                                ELSE 'Incorporado'
                             END
                         ELSE 'Ativo'
                     END AS status_calculado
@@ -325,7 +368,7 @@ class TermoAditivoRepository:
                 params.append(f"%{filters['tipo']}%")
                 idx += 1
             status_calc = filters.get('status_calc')
-            if status_calc in ('Ativo', 'Vencido', 'Inativo', 'Aguardando Vigência'):
+            if status_calc in ('Ativo', 'Incorporado', 'Vencido', 'Inativo', 'Aguardando Vigência'):
                 where_clauses.append(f"ta.status = ${idx}")
                 params.append(status_calc)
                 idx += 1

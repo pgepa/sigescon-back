@@ -387,14 +387,49 @@ Os termos aditivos seguem regras estritas para preservar a segurança jurídica 
    - As colunas `data_inicio` e `data_fim` do contrato são atualizadas para refletir a vigência ativa do aditivo.
 
 3. **Máquina de Estados e Coexistência de Status (Lei 14.133/2021 e TCU)**:
+   - **Controle Automatizado de Status de Contratos**:
+     - Status possíveis: `Ativo`, `Encerrado`, `Suspenso` e `Cancelado`.
+     - Os status `Ativo` e `Encerrado` são controlados 100% pelo sistema com base na vigência (`data_fim`). O usuário não pode selecioná-los manualmente na criação ou edição.
+     - **Criação de Contrato**: O usuário pode informar opcionalmente se o contrato já nasce como `Suspenso` ou `Cancelado`. Caso omitido, o sistema define `Ativo` (se `data_fim >= data atual`) ou `Encerrado` (se `data_fim < data atual`).
+     - **Transições na Edição**: O usuário só pode transicionar para `Suspenso` ou `Cancelado`, exigindo justificativa formal (mínimo 10 caracteres). Se o contrato estiver `Suspenso`, pode ser reativado para `Ativo` mediante justificativa. Contratos com status `Cancelado` tornam-se imutáveis e definitivos.
+   - **Regras de Status de Termos Aditivos**:
+     - **Aditivos de Prazo (1) ou Misto (3)**: Recebem status `Ativo` quando comandam a vigência vigente, `Aguardando Vigência` quando prospectivos (`data_inicio > data atual`), `Vencido` quando a vigência expira, e `Inativo` caso sejam substituídos por um novo aditivo com data de início igual/posterior e data fim distinta.
+     - **Aditivos de Valor (2) ou Outros (4)**: Recebem status `Incorporado` enquanto o contrato/vigência associada estiver ativa, pois já integram as cláusulas contratuais sem comandar o término da vigência. Tornam-se `Vencido` quando a vigência contratual for extinta.
    - **Efeito Prospectivo (`Aguardando Vigência`)**: Quando um termo aditivo de Prazo ou Misto possui `data_inicio > data atual`, seu status inicial é gravado como `Aguardando Vigência`, e a vigência do contrato não é antecipada até a virada da data (executada pelo robô diário de sincronização).
-   - **Histórico e Auditabilidade (`Vencido`)**: Aditivos cuja vigência estipulada já expirou (`nova_data_fim < data atual`) permanecem perenemente como `Vencido`, servindo como registro probatório auditável do período em que vigoraram.
-   - **Reativação de Contratos Encerrados**: O aditamento de prazo para contrato com vigência expirada atualiza a `data_fim` e reativa automaticamente o status do contrato para `Ativo`. O sistema valida e audita a tempestividade em conformidade à **Súmula 282 do TCU** (`data_assinatura <= data_fim_anterior`).
-   - **Cumulatividade e Coexistência de Aditivos de Valor**: Múltiplos aditivos de Valor (ou Misto) permanecem como `Ativo` simultaneamente. O `valor_global` do contrato acumula algebricamente os aditivos vigentes; a inativação ou exclusão de um aditivo estorna exclusivamente a sua parcela, preservando os demais.
+   - **Histórico e Auditabilidade (`Vencido` e `Inativo`)**: Aditivos cuja vigência estipulada já expirou permanecem como `Vencido`. Aditivos de prazo sucedidos por aditamentos posteriores tornam-se `Inativo`.
+   - **Reativação de Contratos Encerrados**: O aditamento tempestivo de prazo para contrato com vigência expirada atualiza a `data_fim` e reativa automaticamente o status do contrato para `Ativo`, validando a tempestividade conforme a **Súmula 282 do TCU** (`data_assinatura <= data_fim_anterior`).
 
 4. **Impacto Financeiro no Valor Global**:
    - Para termos de Valor e Misto, os campos de acréscimo e supressão são consolidados ao `valor_global` do contrato.
    - Em caso de inativação ou exclusão do termo aditivo, o montante correspondente é devidamente estornado, mantendo o histórico orçamentário íntegro.
+
+---
+
+### Governança Contratual e Edição de Dados (Lei nº 14.133/2021)
+
+O sistema implementa regras estritas de governança para prevenir alterações indevidas em contratos públicos:
+
+1. **Campos Sensíveis (Art. 124 da Lei 14.133/2021)**:
+   - `nr_contrato`, `objeto`, `contratado_id`, `modalidade_id`, `valor_global`, `valor_anual`, `data_inicio` e `data_fim`.
+   - **Bloqueio Obrigatório**: Caso o contrato possua termos aditivos cadastrados (`total_aditivos > 0`), status "Encerrado" ou vigência original expirada, estes campos ficam **estritamente bloqueados** para alteração direta. Qualquer alteração deve ser formalizada através da aba de **Termos Aditivos**.
+   - **Justificativa Obrigatória**: Para contratos ativos sem termos aditivos e com vigência regular, a alteração de qualquer um desses campos exige o preenchimento obrigatório do campo `justificativa` com no mínimo 10 caracteres, ficando registrado em auditoria.
+
+2. **Campos Operacionais e Apostilamento (Arts. 136 e 117 da Lei 14.133/2021)**:
+   - `fiscal_id`, `fiscal_substituto_id`, `gestor_id`, `portaria_fiscal`, `pae`, `doe`, `data_doe`, `garantia`, `nr_adesao_ata`, `termos_contratuais`, `base_legal` e upload de documentos.
+   - **Sempre Editáveis**: Podem ser atualizados a qualquer momento por administradores para refletir alterações procedimentais e de fiscalização, mesmo em contratos com termos aditivos.
+
+3. **Robô Retroativo de Sincronização da Base**:
+   - Assegura o preenchimento de `data_inicio_original` e `data_fim_original` para contratos legados.
+   - Recalcula cumulativamente a vigência, o valor financeiro e os status de todos os contratos e termos aditivos ativos.
+   - Disponível via endpoint administrativo `POST /api/v1/contratos/sincronizar-retroativo` (restrito a Administrador) e via script CLI `python -m app.scripts.sync_retroativo`.
+
+4. **Blindagem Temporal e Prevenção de Conflitos de Datas (Lei 14.133/2021 e Súmula 282/TCU)**:
+   - **Inversão Cronológica**: Bloqueio total se `data_fim < data_inicio` ou se `nova_data_fim <= data_inicio`.
+   - **Tempestividade da Prorrogação**: A formalização deve ocorrer estritamente durante a vigência do contrato (`data_assinatura <= vigencia_atual`). Prorrogação de contrato extinto é vedada (Art. 132 e Súmula 282 do TCU).
+   - **Eficácia da Publicação**: Bloqueio se `data_publicacao < data_assinatura` (Art. 94).
+   - **Extensão Efetiva de Vigência**: Em aditivos de Prazo ou Mistos, a nova data de término deve estender a vigência atual (`nova_data_fim > data_fim_atual`).
+   - **Limite Máximo Decenal**: Validação e bloqueio caso as prorrogações sucessivas ultrapassem 10 anos contados do início original (`nova_data_fim - data_inicio_original <= 10 anos / 3.653 dias`), em respeito aos Arts. 106 e 107.
+   - **Início do Aditivo**: Não é permitido termo aditivo com data de início anterior à celebração do contrato original.
 
 ---
 

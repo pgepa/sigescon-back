@@ -25,6 +25,17 @@ class ContratoRepository:
             RETURNING id
         """
 
+        # Garantir resolução de status_id caso venha None
+        final_status_id = contrato.status_id
+        if final_status_id is None:
+            novo_status_nome = await self.conn.fetchval(
+                "SELECT CASE WHEN $1::date >= CURRENT_DATE THEN 'Ativo' ELSE 'Encerrado' END",
+                contrato.data_fim
+            )
+            final_status_id = await self.conn.fetchval(
+                "SELECT id FROM status WHERE nome = $1 AND ativo = TRUE", novo_status_nome
+            ) or (1 if novo_status_nome == 'Ativo' else 3)
+
         new_contrato_id = await self.conn.fetchval(
             query,
             str(contrato.nr_contrato),
@@ -35,7 +46,7 @@ class ContratoRepository:
             contrato.data_fim,  # data_fim_original — vigência de nascença do contrato, imutável
             int(contrato.contratado_id),
             int(contrato.modalidade_id),
-            int(contrato.status_id),
+            int(final_status_id),
             int(contrato.gestor_id) if contrato.gestor_id is not None else None,
             int(contrato.fiscal_id) if contrato.fiscal_id is not None else None,
             float(contrato.valor_anual) if contrato.valor_anual is not None else None,
@@ -66,7 +77,8 @@ class ContratoRepository:
                 s.nome AS status_nome,
                 gestor.nome AS gestor_nome,
                 fiscal.nome AS fiscal_nome,
-                fiscal_sub.nome AS fiscal_substituto_nome
+                fiscal_sub.nome AS fiscal_substituto_nome,
+                (SELECT COUNT(*) FROM termo_aditivo ta WHERE ta.contrato_id = c.id AND ta.ativo = TRUE) AS total_aditivos
             FROM contrato c
             LEFT JOIN contratado ct ON c.contratado_id = ct.id
             LEFT JOIN modalidade m ON c.modalidade_id = m.id
@@ -309,6 +321,10 @@ class ContratoRepository:
                         )
                         update_data['status_id'] = novo_status_id
 
+            # Remover campos que não são colunas da tabela contrato
+            update_data.pop('justificativa', None)
+            update_data.pop('matricula', None)
+
             # Construir UPDATE de forma simples
             set_clauses = []
             values = []
@@ -484,7 +500,7 @@ class ContratoRepository:
             SET 
                 valor_global = CASE 
                     WHEN t.qtd_ativos > 0 THEN COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao
-                    ELSE COALESCE(c.valor_anual, c.valor_global)
+                    ELSE COALESCE(c.valor_global, c.valor_anual)
                 END,
                 updated_at = NOW()
             FROM totais t
