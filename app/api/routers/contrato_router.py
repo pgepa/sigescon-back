@@ -52,7 +52,7 @@ async def _create_contrato_logic(
     data_fim: date,
     contratado_id: int,
     modalidade_id: int,
-    status_id: int,
+    status_id: Optional[int],
     gestor_id: Optional[int],
     fiscal_id: Optional[int],
     valor_anual: Optional[float],
@@ -114,7 +114,7 @@ async def create_contrato_with_slash(
     data_fim: date = Form(...),
     contratado_id: int = Form(...),
     modalidade_id: int = Form(...),
-    status_id: int = Form(...),
+    status_id: Optional[int] = Form(None),
     gestor_id: Optional[int] = Form(None),
     fiscal_id: Optional[int] = Form(None),
     valor_anual: Optional[float] = Form(None),
@@ -154,7 +154,7 @@ async def create_contrato(
     data_fim: date = Form(...),
     contratado_id: int = Form(...),
     modalidade_id: int = Form(...),
-    status_id: int = Form(...),
+    status_id: Optional[int] = Form(None),
     gestor_id: Optional[int] = Form(None),
     fiscal_id: Optional[int] = Form(None),
     valor_anual: Optional[float] = Form(None),
@@ -359,6 +359,7 @@ async def update_contrato(
     portaria_fiscal: Optional[str] = Form(None),
     nr_adesao_ata: Optional[str] = Form(None),
     justificativa: Optional[str] = Form(None),
+    matricula: Optional[str] = Form(None),
     # Arquivos opcionais para upload
     documento_contrato: List[UploadFile] = File(None),
     documento_portaria: Optional[UploadFile] = File(None),
@@ -396,6 +397,7 @@ async def update_contrato(
         'portaria_fiscal': portaria_fiscal,
         'nr_adesao_ata': nr_adesao_ata,
         'justificativa': justificativa,
+        'matricula': matricula,
     }
 
     for field, value in form_fields.items():

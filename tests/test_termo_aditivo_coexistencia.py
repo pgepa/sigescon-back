@@ -95,14 +95,14 @@ async def test_fluxo_completo_termo_aditivo_e_coexistencia():
                 valor_acrescimo=25000.0
             )
         )
-        assert aditivo_2.status == 'Ativo'
+        assert aditivo_2.status == 'Incorporado'
         assert aditivo_2.nova_data_fim == nova_data_fim_1
 
-        # Validar REGRA DA LEI 14.133/2021: Aditivo 1 (Prazo vigente) e Aditivo 2 (Valor) COEXISTEM COMO ATIVO!
+        # Validar REGRA DA LEI 14.133/2021: Aditivo 1 (Prazo vigente: Ativo) e Aditivo 2 (Valor: Incorporado) COEXISTEM!
         aditivo_1_check = await termo_aditivo_repo.get_by_id(aditivo_1.id)
         assert aditivo_1_check['status'] == 'Ativo', "Aditivo 1 de prazo vigente deve continuar Ativo!"
         aditivo_2_check = await termo_aditivo_repo.get_by_id(aditivo_2.id)
-        assert aditivo_2_check['status'] == 'Ativo', "Aditivo 2 de valor vigente deve continuar Ativo!"
+        assert aditivo_2_check['status'] == 'Incorporado', "Aditivo 2 de valor vigente deve ser Incorporado!"
 
         # Validar que a vigência do Aditivo 1 e o valor do Aditivo 2 PERMANECEM NO CONTRATO
         contrato_atualizado = await contrato_repo.find_contrato_by_id(contrato_id)
@@ -122,14 +122,14 @@ async def test_fluxo_completo_termo_aditivo_e_coexistencia():
                 data_publicacao=hoje
             )
         )
-        assert aditivo_3.status == 'Ativo'
+        assert aditivo_3.status == 'Incorporado'
         assert aditivo_3.nova_data_fim == nova_data_fim_1
 
-        # Validar que todos continuam Ativos (coexistência harmônica)
+        # Validar que todos continuam válidos (coexistência harmônica)
         aditivo_1_check = await termo_aditivo_repo.get_by_id(aditivo_1.id)
         aditivo_2_check = await termo_aditivo_repo.get_by_id(aditivo_2.id)
         assert aditivo_1_check['status'] == 'Ativo'
-        assert aditivo_2_check['status'] == 'Ativo'
+        assert aditivo_2_check['status'] == 'Incorporado'
 
         # 6. Executar a rotina do Robô de Sincronização Geral com contrato vigente
         await termo_aditivo_repo.sincronizar_status_todos_aditivos()
@@ -138,8 +138,8 @@ async def test_fluxo_completo_termo_aditivo_e_coexistencia():
         lista = await service.listar_por_contrato(contrato_id)
         status_map = {a.id: a.status for a in lista}
         assert status_map[aditivo_1.id] == 'Ativo'
-        assert status_map[aditivo_2.id] == 'Ativo'
-        assert status_map[aditivo_3.id] == 'Ativo'
+        assert status_map[aditivo_2.id] == 'Incorporado'
+        assert status_map[aditivo_3.id] == 'Incorporado'
 
         # 7. Simular expiração do contrato (robô marca contrato como Encerrado e TODOS aditivos como Vencido)
         ontem = hoje - timedelta(days=1)

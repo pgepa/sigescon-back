@@ -387,10 +387,17 @@ Os termos aditivos seguem regras estritas para preservar a segurança jurídica 
    - As colunas `data_inicio` e `data_fim` do contrato são atualizadas para refletir a vigência ativa do aditivo.
 
 3. **Máquina de Estados e Coexistência de Status (Lei 14.133/2021 e TCU)**:
+   - **Controle Automatizado de Status de Contratos**:
+     - Status possíveis: `Ativo`, `Encerrado`, `Suspenso` e `Cancelado`.
+     - Os status `Ativo` e `Encerrado` são controlados 100% pelo sistema com base na vigência (`data_fim`). O usuário não pode selecioná-los manualmente na criação ou edição.
+     - **Criação de Contrato**: O usuário pode informar opcionalmente se o contrato já nasce como `Suspenso` ou `Cancelado`. Caso omitido, o sistema define `Ativo` (se `data_fim >= data atual`) ou `Encerrado` (se `data_fim < data atual`).
+     - **Transições na Edição**: O usuário só pode transicionar para `Suspenso` ou `Cancelado`, exigindo justificativa formal (mínimo 10 caracteres). Se o contrato estiver `Suspenso`, pode ser reativado para `Ativo` mediante justificativa. Contratos com status `Cancelado` tornam-se imutáveis e definitivos.
+   - **Regras de Status de Termos Aditivos**:
+     - **Aditivos de Prazo (1) ou Misto (3)**: Recebem status `Ativo` quando comandam a vigência vigente, `Aguardando Vigência` quando prospectivos (`data_inicio > data atual`), `Vencido` quando a vigência expira, e `Inativo` caso sejam substituídos por um novo aditivo com data de início igual/posterior e data fim distinta.
+     - **Aditivos de Valor (2) ou Outros (4)**: Recebem status `Incorporado` enquanto o contrato/vigência associada estiver ativa, pois já integram as cláusulas contratuais sem comandar o término da vigência. Tornam-se `Vencido` quando a vigência contratual for extinta.
    - **Efeito Prospectivo (`Aguardando Vigência`)**: Quando um termo aditivo de Prazo ou Misto possui `data_inicio > data atual`, seu status inicial é gravado como `Aguardando Vigência`, e a vigência do contrato não é antecipada até a virada da data (executada pelo robô diário de sincronização).
-   - **Histórico e Auditabilidade (`Vencido`)**: Aditivos cuja vigência estipulada já expirou (`nova_data_fim < data atual`) permanecem perenemente como `Vencido`, servindo como registro probatório auditável do período em que vigoraram.
-   - **Reativação de Contratos Encerrados**: O aditamento de prazo para contrato com vigência expirada atualiza a `data_fim` e reativa automaticamente o status do contrato para `Ativo`. O sistema valida e audita a tempestividade em conformidade à **Súmula 282 do TCU** (`data_assinatura <= data_fim_anterior`).
-   - **Cumulatividade e Coexistência de Aditivos de Valor**: Múltiplos aditivos de Valor (ou Misto) permanecem como `Ativo` simultaneamente. O `valor_global` do contrato acumula algebricamente os aditivos vigentes; a inativação ou exclusão de um aditivo estorna exclusivamente a sua parcela, preservando os demais.
+   - **Histórico e Auditabilidade (`Vencido` e `Inativo`)**: Aditivos cuja vigência estipulada já expirou permanecem como `Vencido`. Aditivos de prazo sucedidos por aditamentos posteriores tornam-se `Inativo`.
+   - **Reativação de Contratos Encerrados**: O aditamento tempestivo de prazo para contrato com vigência expirada atualiza a `data_fim` e reativa automaticamente o status do contrato para `Ativo`, validando a tempestividade conforme a **Súmula 282 do TCU** (`data_assinatura <= data_fim_anterior`).
 
 4. **Impacto Financeiro no Valor Global**:
    - Para termos de Valor e Misto, os campos de acréscimo e supressão são consolidados ao `valor_global` do contrato.
