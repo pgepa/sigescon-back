@@ -87,7 +87,7 @@ class TermoAditivo(TermoAditivoBase):
     arquivo_id: Optional[int] = None
     arquivo_nome: Optional[str] = None
     ativo: bool = True
-    status: str = Field("Ativo", description="Status calculado do aditivo: Ativo, Vencido ou Inativo")
+    status: str = Field("Ativo", description="Status calculado do aditivo: Ativo, Incorporado, Vencido ou Inativo")
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

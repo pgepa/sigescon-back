@@ -25,6 +25,17 @@ class ContratoRepository:
             RETURNING id
         """
 
+        # Garantir resolução de status_id caso venha None
+        final_status_id = contrato.status_id
+        if final_status_id is None:
+            novo_status_nome = await self.conn.fetchval(
+                "SELECT CASE WHEN $1::date >= CURRENT_DATE THEN 'Ativo' ELSE 'Encerrado' END",
+                contrato.data_fim
+            )
+            final_status_id = await self.conn.fetchval(
+                "SELECT id FROM status WHERE nome = $1 AND ativo = TRUE", novo_status_nome
+            ) or (1 if novo_status_nome == 'Ativo' else 3)
+
         new_contrato_id = await self.conn.fetchval(
             query,
             str(contrato.nr_contrato),
@@ -35,7 +46,7 @@ class ContratoRepository:
             contrato.data_fim,  # data_fim_original — vigência de nascença do contrato, imutável
             int(contrato.contratado_id),
             int(contrato.modalidade_id),
-            int(contrato.status_id),
+            int(final_status_id),
             int(contrato.gestor_id) if contrato.gestor_id is not None else None,
             int(contrato.fiscal_id) if contrato.fiscal_id is not None else None,
             float(contrato.valor_anual) if contrato.valor_anual is not None else None,
@@ -312,6 +323,7 @@ class ContratoRepository:
 
             # Remover campos que não são colunas da tabela contrato
             update_data.pop('justificativa', None)
+            update_data.pop('matricula', None)
 
             # Construir UPDATE de forma simples
             set_clauses = []

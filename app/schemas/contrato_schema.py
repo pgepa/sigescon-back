@@ -10,7 +10,7 @@ class ContratoBase(BaseModel):
     data_fim: date
     contratado_id: int
     modalidade_id: int
-    status_id: int
+    status_id: Optional[int] = None
     gestor_id: Optional[int] = None
     fiscal_id: Optional[int] = None
     valor_anual: Optional[float] = None
@@ -93,6 +93,7 @@ class ContratoUpdate(BaseModel):
     portaria_fiscal: Optional[str] = Field(None, max_length=255)
     nr_adesao_ata: Optional[str] = Field(None, max_length=255)
     justificativa: Optional[str] = None
+    matricula: Optional[str] = Field(None, max_length=50, description="Matrícula do responsável pela alteração de status")
 
     @field_validator('valor_anual')
     @classmethod

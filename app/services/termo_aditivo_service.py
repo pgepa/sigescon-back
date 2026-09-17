@@ -111,7 +111,14 @@ class TermoAditivoService:
                     )
                 )
 
-            # 5. Prorrogação efetiva na criação: nova data fim deve estender a vigência atual
+            # 5. Vigência não pode ser idêntica à original
+            if orig_inicio and orig_fim and data_inicio == orig_inicio and nova_data_fim == orig_fim:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A vigência do termo aditivo não pode ser idêntica à vigência original do contrato."
+                )
+
+            # 6. Prorrogação efetiva na criação: nova data fim deve estender a vigência atual
             if is_criacao and data_fim_atual and nova_data_fim <= data_fim_atual:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -119,13 +126,6 @@ class TermoAditivoService:
                         f"Para termos aditivos de Prazo ou Misto, a nova data fim ({nova_data_fim.strftime('%d/%m/%Y')}) "
                         f"deve ser estritamente posterior à vigência atual do contrato ({data_fim_atual.strftime('%d/%m/%Y')})."
                     )
-                )
-
-            # 6. Vigência não pode ser idêntica à original
-            if orig_inicio and orig_fim and data_inicio == orig_inicio and nova_data_fim == orig_fim:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="A vigência do termo aditivo não pode ser idêntica à vigência original do contrato."
                 )
 
             # 7. Limite Máximo Decenal (Arts. 106 e 107 da Lei 14.133/2021)

@@ -164,6 +164,27 @@ class ContratoService:
 
         # Dados recebidos validados pelo Pydantic
 
+        # Determinação automática do status se não informado ou se fornecido Ativo/Encerrado
+        if contrato_create.status_id is None:
+            today = date.today()
+            status_nome_calculado = "Ativo" if contrato_create.data_fim >= today else "Encerrado"
+            status_reg = await self.contrato_repo.conn.fetchrow(
+                "SELECT id FROM status WHERE nome = $1 AND ativo = TRUE",
+                status_nome_calculado
+            )
+            if status_reg:
+                contrato_create.status_id = status_reg['id']
+            else:
+                contrato_create.status_id = 1 if status_nome_calculado == "Ativo" else 3
+        else:
+            # Se foi informado status_id, apenas Suspenso ou Cancelado são permitidos manualmente
+            status_inf = await self.status_repo.get_status_by_id(contrato_create.status_id)
+            if not status_inf or status_inf.get('nome') not in ('Suspenso', 'Cancelado'):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Na criação de contratos, são permitidos apenas os status 'Suspenso' ou 'Cancelado'. Os status 'Ativo' e 'Encerrado' são calculados automaticamente pela vigência."
+                )
+
         # Validação de chaves estrangeiras
         await self._validate_foreign_keys(contrato_create)
 
@@ -297,6 +318,69 @@ class ContratoService:
                 return None
 
             # Detectar quais campos sensíveis foram alterados
+            # Validações estritas de transição de status (Lei 14.133 / Governança SIGESCON):
+            # 1. Contrato Cancelado é definitivo e irreversível: não pode ser reativado nem ter outros campos alterados
+            status_atual_id = existing_contrato.get('status_id')
+            status_atual_nome = existing_contrato.get('status_nome')
+
+            if status_atual_nome == 'Cancelado':
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Este contrato está Cancelado. Um contrato cancelado não pode ser reativado nem ter seus dados modificados."
+                )
+
+            # 2. Se houver tentativa de alteração de status:
+            if contrato_update.status_id is not None and contrato_update.status_id != status_atual_id:
+                matricula = contrato_update.matricula
+                if not matricula or not matricula.strip():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="A alteração de status do contrato exige a informação da matrícula do responsável para fins de auditoria."
+                    )
+
+                novo_status = await self.status_repo.get_status_by_id(contrato_update.status_id)
+                if not novo_status:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Status não encontrado")
+                
+                novo_status_nome = novo_status.get('nome')
+                justificativa = contrato_update.justificativa
+
+                # Ativo e Encerrado são geridos exclusivamente pelo sistema pela vigência
+                if novo_status_nome == 'Encerrado':
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="O status 'Encerrado' é gerido automaticamente pelo sistema conforme a vigência do contrato e não pode ser definido manualmente."
+                    )
+
+                # Transição para Cancelado: exige justificativa formal
+                if novo_status_nome == 'Cancelado':
+                    if not justificativa or len(justificativa.strip()) < 10:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="O cancelamento formal do contrato exige uma justificativa com no mínimo 10 caracteres."
+                        )
+
+                # Transição para Suspenso: exige justificativa formal
+                elif novo_status_nome == 'Suspenso':
+                    if not justificativa or len(justificativa.strip()) < 10:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="A suspensão do contrato exige uma justificativa formal com no mínimo 10 caracteres."
+                        )
+
+                # Retorno de Suspenso para Ativo (reativação): exige justificativa formal
+                elif novo_status_nome == 'Ativo':
+                    if status_atual_nome != 'Suspenso':
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="O status 'Ativo' é gerido automaticamente pelo sistema conforme a vigência. Apenas contratos suspensos podem retornar para 'Ativo'."
+                        )
+                    if not justificativa or len(justificativa.strip()) < 10:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="A reativação de um contrato suspenso exige uma justificativa formal com no mínimo 10 caracteres."
+                        )
+
             campos_sensiveis = [
                 'nr_contrato', 'objeto', 'contratado_id', 'modalidade_id',
                 'valor_global', 'valor_anual', 'data_inicio', 'data_fim'
@@ -492,7 +576,9 @@ class ContratoService:
                         'gestor_id': existing_contrato.get('gestor_id'),
                         'fiscal_id': existing_contrato.get('fiscal_id'),
                         'data_inicio': str(existing_contrato.get('data_inicio')) if existing_contrato.get('data_inicio') else None,
-                        'data_fim': str(existing_contrato.get('data_fim')) if existing_contrato.get('data_fim') else None
+                        'data_fim': str(existing_contrato.get('data_fim')) if existing_contrato.get('data_fim') else None,
+                        'status_id': existing_contrato.get('status_id'),
+                        'status_nome': existing_contrato.get('status_nome'),
                     }
 
                     # Preparar dados novos
@@ -509,8 +595,14 @@ class ContratoService:
                         dados_novos['data_inicio'] = str(contrato_update.data_inicio)
                     if contrato_update.data_fim is not None:
                         dados_novos['data_fim'] = str(contrato_update.data_fim)
+                    if contrato_update.status_id is not None:
+                        dados_novos['status_id'] = contrato_update.status_id
+                        if 'novo_status_nome' in locals() and novo_status_nome:
+                            dados_novos['status_nome'] = novo_status_nome
                     if contrato_update.justificativa is not None:
                         dados_novos['justificativa'] = contrato_update.justificativa
+                    if contrato_update.matricula is not None:
+                        dados_novos['matricula'] = contrato_update.matricula
 
                     await audit_atualizar_contrato(
                         conn=self.contrato_repo.conn,
