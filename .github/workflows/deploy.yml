@@ -1,9 +1,9 @@
-name: Deploy Backend
+name: Deploy Backend Sigescon
 
 on:
   workflow_dispatch:
   push:
-    branches: [ homologation, main ]
+    branches: [ main, homologation ]
 
 jobs:
   deploy-homolog:
@@ -12,7 +12,7 @@ jobs:
     runs-on: [ self-hosted, homologation ]
     steps:
       - name: Executar script de deploy de homologação
-        run: /home/ginf/scripts/sigescon/deploy-back.sh
+        run: /home/ginf/scripts/sigescon/deploy-back.sh ${{ github.ref_name }}
 
   deploy-prod:
     name: Deploy Produção
