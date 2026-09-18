@@ -20,4 +20,4 @@ jobs:
     runs-on: [ self-hosted, production ]
     steps:
       - name: Executar script de deploy de produção
-        run: ~/deploy-back.sh
+        run: /home/ginf/scripts/sigescon/deploy-sigescon-back.sh ${{ github.ref_name }}
