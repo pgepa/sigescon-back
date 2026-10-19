@@ -31,14 +31,13 @@ dependencies = [
 # Dependências usadas apenas para desenvolvimento e testes
 dev = [
     "pytest",
-    "pytest-asyncio",    
+    "pytest-asyncio",
     "httpx",
     "anyio"
 ]
 
 [tool.setuptools]
 packages = ["app"]
-
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -47,9 +46,9 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"  # Ativa o modo assíncrono automaticamente
 addopts = [
-    "-v",           # Verbose
-    "-s",           # Mostra prints
-    "--tb=short",   # Traceback curto
+    "-v",
+    "-s",
+    "--tb=short",
 ]
 
 [dependency-groups]

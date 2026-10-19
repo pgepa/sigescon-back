@@ -25,22 +25,9 @@ class ContratoBase(BaseModel):
     portaria_fiscal: Optional[str] = Field(None, max_length=255)
     nr_adesao_ata: Optional[str] = Field(None, max_length=255)
 
-    @field_validator('valor_anual')
-    @classmethod
-    def validate_valor_anual(cls, v):
-        if v is not None and v < 0:
-            raise ValueError('Valor anual não pode ser negativo')
-        return v
-
-    @field_validator('valor_global')
-    @classmethod
-    def validate_valor_global(cls, v):
-        if v is not None and v < 0:
-            raise ValueError('Valor global não pode ser negativo')
-        return v
-
 # Schema para a resposta da API (leitura de um contrato)
 # Inclui campos de tabelas relacionadas (JOINs)
+# Sem validação de valores: um dado inconsistente no banco não pode derrubar a leitura (500).
 class Contrato(ContratoBase):
     id: int
     ativo: bool
@@ -58,6 +45,20 @@ class Contrato(ContratoBase):
 
 # Schema para a criação de um novo contrato 
 class ContratoCreate(ContratoBase):
+    @field_validator('valor_anual')
+    @classmethod
+    def validate_valor_anual(cls, v):
+        if v is not None and v < 0:
+            raise ValueError('Valor anual não pode ser negativo')
+        return v
+
+    @field_validator('valor_global')
+    @classmethod
+    def validate_valor_global(cls, v):
+        if v is not None and v < 0:
+            raise ValueError('Valor global não pode ser negativo')
+        return v
+
     @model_validator(mode='after')
     def validate_datas_create(self) -> 'ContratoCreate':
         if self.data_inicio and self.data_fim and self.data_fim < self.data_inicio:
