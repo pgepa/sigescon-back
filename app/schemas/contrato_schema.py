@@ -18,7 +18,7 @@ class ContratoBase(BaseModel):
     base_legal: Optional[str] = Field(None, max_length=255)
     termos_contratuais: Optional[str] = None
     fiscal_substituto_id: Optional[int] = None
-    pae: Optional[str] = Field(None, max_length=50)
+    pae: Optional[str] = None
     doe: Optional[str] = Field(None, max_length=50)
     data_doe: Optional[date] = None
     garantia: Optional[date] = None
@@ -33,6 +33,7 @@ class Contrato(ContratoBase):
     ativo: bool
     data_inicio_original: Optional[date] = None
     data_fim_original: Optional[date] = None
+    valor_global_original: Optional[float] = None
     contratado_nome: Optional[str] = None
     modalidade_nome: Optional[str] = None
     status_nome: Optional[str] = None
@@ -87,7 +88,7 @@ class ContratoUpdate(BaseModel):
     base_legal: Optional[str] = Field(None, max_length=255)
     termos_contratuais: Optional[str] = None
     fiscal_substituto_id: Optional[int] = None
-    pae: Optional[str] = Field(None, max_length=50)
+    pae: Optional[str] = None
     doe: Optional[str] = Field(None, max_length=50)
     data_doe: Optional[date] = None
     garantia: Optional[date] = None
