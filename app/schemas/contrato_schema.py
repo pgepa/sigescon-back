@@ -33,6 +33,7 @@ class Contrato(ContratoBase):
     ativo: bool
     data_inicio_original: Optional[date] = None
     data_fim_original: Optional[date] = None
+    valor_global_original: Optional[float] = None
     contratado_nome: Optional[str] = None
     modalidade_nome: Optional[str] = None
     status_nome: Optional[str] = None
