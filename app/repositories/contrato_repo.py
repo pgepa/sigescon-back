@@ -19,9 +19,9 @@ class ContratoRepository:
                 modalidade_id, status_id, gestor_id, fiscal_id,
                 valor_anual, valor_global, base_legal, termos_contratuais,
                 fiscal_substituto_id, pae, doe, data_doe, garantia,
-                portaria_fiscal, nr_adesao_ata
+                portaria_fiscal, nr_adesao_ata, valor_global_original
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $13)
             RETURNING id
         """
 
@@ -276,6 +276,22 @@ class ContratoRepository:
                 else:
                     update_data['data_inicio_original'] = update_data['data_inicio']
 
+            # Valor Global editado no formulário: o formulário mostra o valor
+            # ATUAL (original + aditivos). Se há aditivos financeiros ativos,
+            # o original é derivado descontando o efeito deles; senão, o valor
+            # digitado é o próprio original. A sincronização depois recalcula
+            # valor_global = original + acréscimos - supressões.
+            if 'valor_global' in update_data and update_data['valor_global'] is not None:
+                efeito_aditivos = await self.conn.fetchval(
+                    """
+                    SELECT COALESCE(SUM(valor_acrescimo), 0) - COALESCE(SUM(valor_supressao), 0)
+                    FROM termo_aditivo
+                    WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (2, 3)
+                    """,
+                    contrato_id
+                )
+                update_data['valor_global_original'] = float(update_data['valor_global']) - float(efeito_aditivos or 0)
+
             # Se a Data Fim está sendo editada diretamente no formulário do
             # contrato, o termo aditivo de Prazo/Misto ativo (se houver) é quem
             # manda — a edição manual não pode contradizer o que o aditivo já
@@ -486,25 +502,25 @@ class ContratoRepository:
         """
         await self.conn.execute(query_vigencia, contrato_id)
 
-        # Sincroniza valor financeiro cumulativo com todos os aditivos financeiros (ativo = TRUE)
+        # Sincroniza valor_global a partir do valor ORIGINAL + aditivos financeiros ativos.
+        # Nunca usa o próprio valor_global como base (isso reaplicava os aditivos a
+        # cada sincronização). Sem valor_global_original definido, não mexe no valor.
         query_valor = """
             WITH totais AS (
                 SELECT 
-                    COALESCE(SUM(valor_acrescimo), 0.0) AS soma_acrescimo,
-                    COALESCE(SUM(valor_supressao), 0.0) AS soma_supressao,
-                    COUNT(*) AS qtd_ativos
+                    COALESCE(SUM(valor_acrescimo), 0) AS soma_acrescimo,
+                    COALESCE(SUM(valor_supressao), 0) AS soma_supressao
                 FROM termo_aditivo
                 WHERE contrato_id = $1 AND ativo = TRUE AND tipo_id IN (2, 3)
             )
             UPDATE contrato c
             SET 
-                valor_global = CASE 
-                    WHEN t.qtd_ativos > 0 THEN COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao
-                    ELSE COALESCE(c.valor_global, c.valor_anual)
-                END,
+                valor_global = c.valor_global_original + t.soma_acrescimo - t.soma_supressao,
                 updated_at = NOW()
             FROM totais t
             WHERE c.id = $1
+              AND c.valor_global_original IS NOT NULL
+              AND c.valor_global IS DISTINCT FROM (c.valor_global_original + t.soma_acrescimo - t.soma_supressao)
         """
         await self.conn.execute(query_valor, contrato_id)
 
@@ -582,24 +598,36 @@ class ContratoRepository:
         """
         rows = await self.conn.fetch(query)
 
-        # Sincronização geral cumulativa de valor financeiro
+        # Sincronização geral do valor financeiro: original + aditivos ativos.
+        # Inclui contratos cujo último aditivo financeiro foi inativado (volta ao original).
         await self.conn.execute(
             """
             WITH totais_por_contrato AS (
                 SELECT 
                     contrato_id,
-                    COALESCE(SUM(valor_acrescimo), 0.0) AS soma_acrescimo,
-                    COALESCE(SUM(valor_supressao), 0.0) AS soma_supressao
+                    COALESCE(SUM(valor_acrescimo), 0) AS soma_acrescimo,
+                    COALESCE(SUM(valor_supressao), 0) AS soma_supressao
                 FROM termo_aditivo
                 WHERE ativo = TRUE AND tipo_id IN (2, 3)
                 GROUP BY contrato_id
+            ),
+            calculo AS (
+                SELECT
+                    c.id,
+                    c.valor_global_original
+                        + COALESCE(t.soma_acrescimo, 0)
+                        - COALESCE(t.soma_supressao, 0) AS novo_valor
+                FROM contrato c
+                LEFT JOIN totais_por_contrato t ON t.contrato_id = c.id
+                WHERE c.valor_global_original IS NOT NULL
             )
             UPDATE contrato c
             SET 
-                valor_global = COALESCE(c.valor_anual, c.valor_global, 0) + t.soma_acrescimo - t.soma_supressao,
+                valor_global = calc.novo_valor,
                 updated_at = NOW()
-            FROM totais_por_contrato t
-            WHERE c.id = t.contrato_id
+            FROM calculo calc
+            WHERE c.id = calc.id
+              AND c.valor_global IS DISTINCT FROM calc.novo_valor
             """
         )
 
